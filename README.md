@@ -7,8 +7,42 @@ before boarding.
 Pint Marten is a local-first PWA (progressive web app): your drinking history stays on
 your device. Seed it by importing an export from another tracking app or a spreadsheet.
 
-**Status:** planning. See [`docs/SPEC.md`](docs/SPEC.md) for the product and technical
-spec.
+**Status:** early development (milestone M1, app scaffold). See
+[`docs/SPEC.md`](docs/SPEC.md) for the product and technical spec.
+
+## Development
+
+Requires Node.js 22+ and [pnpm](https://pnpm.io) (version pinned in `package.json`).
+
+```sh
+pnpm install
+pnpm dev            # dev server at http://localhost:5173
+pnpm build          # static site in build/
+pnpm preview        # serve the production build at http://localhost:4173
+```
+
+Checks (the same ones CI runs):
+
+```sh
+pnpm lint           # Prettier + ESLint
+pnpm check          # svelte-check + service worker typecheck
+pnpm test:unit --run
+pnpm test:e2e       # builds, then runs Playwright against the production build
+```
+
+`pnpm test:e2e` needs a Playwright Chromium (`pnpm exec playwright install chromium`). To use
+an existing Chromium instead, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its path.
+
+### How it's put together
+
+- **SvelteKit, fully prerendered** with `@sveltejs/adapter-static`. There is no server; `build/`
+  can be served by any static host (Cloudflare Pages is the plan; `static/_headers` holds its
+  security headers).
+- **Offline support** comes from SvelteKit's built-in service worker (`src/service-worker/`).
+  Request-handling rules live in `src/lib/sw/strategy.ts` so they can be unit tested.
+- **Content Security Policy** is set in `vite.config.ts` and emitted as a `<meta>` tag with
+  hashes for SvelteKit's inline bootstrap script. Only `'self'` is allowed today; add a host to
+  `connect-src`/`img-src` only when a feature needs it.
 
 ## License
 

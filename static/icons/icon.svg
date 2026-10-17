@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+	<!-- Placeholder mark: a pint glass. Replace once the marten mascot is designed. -->
+	<rect width="512" height="512" rx="112" fill="#1f3a2e"/>
+	<path d="M160 136h192l-22 268a24 24 0 0 1-24 22H206a24 24 0 0 1-24-22z" fill="#e9a23b"/>
+	<path d="M152 120c0-22 18-36 40-36 10-18 30-28 52-24 14-16 40-20 58-8 22-6 46 8 52 30 22 2 38 20 34 42l-4 20H156z" fill="#fbf6ea"/>
+	<path d="M160 136h192l-22 268a24 24 0 0 1-24 22H206a24 24 0 0 1-24-22z" fill="none" stroke="#fbf6ea" stroke-width="12" stroke-linejoin="round"/>
+</svg>

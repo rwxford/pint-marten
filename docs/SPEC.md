@@ -322,8 +322,8 @@ Choices optimize for **performance** (fast load on mobile data, small bundles) a
 | Layer | Choice | Why |
 |---|---|---|
 | Language | TypeScript (strict) | Type safety across parsers and data model |
-| UI framework | **SvelteKit** (static/SPA build) | Compiles to small, fast bundles with no virtual-DOM runtime; first-class static output |
-| Build/PWA | Vite + `@vite-pwa/sveltekit` (Workbox) | Service worker, offline caching, installability |
+| UI framework | **SvelteKit 3 / Svelte 5** (fully prerendered static build) | Compiles to small, fast bundles with no virtual-DOM runtime; first-class static output |
+| Build/PWA | Vite + SvelteKit's built-in service worker and a hand-written web app manifest | Offline caching and installability with no extra dependencies. (Originally planned `@vite-pwa/sveltekit`; dropped in M1 to keep the dependency tree small and avoid lagging SvelteKit 3 support.) |
 | Local DB | IndexedDB via **Dexie** | Mature, small, works on iOS Safari; indexed queries for history lookups |
 | Map rendering | **MapLibre GL JS** | Open-source vector maps, GPU-rendered, no vendor lock-in |
 | Map tiles | **OpenFreeMap** (free, no API key); Protomaps self-hosted later | No keys or tracking in Phase 1 |
@@ -436,7 +436,7 @@ current limits). For a single user this is plenty. Results are cached by
 
 | # | Milestone | Done when |
 |---|---|---|
-| M1 | Scaffold | SvelteKit + PWA installable, CSP in place, CI running lint/typecheck/tests |
+| M1 | Scaffold | SvelteKit + PWA installable, CSP in place, CI running lint/typecheck/tests. **In review.** |
 | M2 | Import | Untappd export + generic mapper import into Dexie; review queue; idempotent re-import |
 | M3 | Map & venues | MapLibre map, Overpass venue fetch + cache, visited/unvisited styling |
 | M4 | Travel time | ORS isochrone + matrix, walk/drive toggle, minutes slider, ranked list |
