@@ -66,6 +66,24 @@ security side and boarding time.
 | Untappd | CSV or JSON export (Insiders feature) | Phase 1. User-initiated export file only — no API use. Expected columns include `beer_name`, `brewery_name`, `beer_type`, `beer_abv`, `venue_name`, `venue_lat`, `venue_lng`, `created_at`, `rating_score`. **Verify against a real export.** |
 | Generic spreadsheet | CSV, TSV, XLSX | Phase 1. Column-mapping wizard (below). Also covers any other app's export (e.g., BeerAdvocate, RateBeer) via saved mapping presets — no dedicated importers planned. |
 
+**Untappd export details (verified against a real export, 2026-10)**
+
+- CSV starts with a UTF-8 byte-order mark; JSON is a list of objects with the same keys, but
+  `flavor_profiles` and `tagged_friends` are arrays and numbers are numeric.
+- `beer_abv` of **0 means "unknown"**, not non-alcoholic (e.g., many pale lagers are listed at 0).
+  Real NA beers are listed at 0.1–0.5% under ordinary styles (e.g., "IPA - New England / Hazy").
+- `venue_id` of 0 means no venue was tagged (home, etc.).
+- `created_at` is ISO 8601 with a UTC offset; it's stored as given.
+- Styles include non-beer drinks: hard seltzer, kombucha, sake, RTD (ready-to-drink) cocktails,
+  sodas and sparkling water. These are imported with category **other**, hidden by default in
+  search. "Barleywine" and "Wheat Wine" are beer styles.
+- **Data minimization:** only drink, producer, venue, date, rating and serving type are kept.
+  Comments, photos, tagged friends, toasts, purchase venue and URLs are dropped at parse time.
+
+**XLSX (Excel) import is deferred.** SheetJS, the usual parser, isn't kept current on the npm
+registry, and the maintained build must be installed from the vendor's CDN. Spreadsheets can be
+saved as CSV in the meantime.
+
 **Generic mapper wizard**
 
 1. User drops a file → parsed in a Web Worker (a background thread, so the UI doesn't
@@ -83,7 +101,11 @@ security side and boarding time.
 - Beer identity key = `normalize(brewery) + "|" + normalize(beer)`. Exact key match merges
   automatically; near matches (string-similarity ≥ threshold) go to a review queue rather
   than merging silently.
-- Re-importing the same file is idempotent (same source row → same record).
+- Re-importing the same file is idempotent (same source row → same record). Rows without a
+  source ID get a fingerprint of their mapped values plus an occurrence number, so two
+  identical rows (two pints of the same beer on the same day) stay separate.
+- Two records that both carry the same app's IDs are never queued for review: that app has
+  already decided they're different.
 - Venue matching from import → OpenStreetMap: within 150 m **and** name similarity above
   a threshold → "visited". Imports without coordinates match on name + city, falling back
   to the review queue.
@@ -436,8 +458,8 @@ current limits). For a single user this is plenty. Results are cached by
 
 | # | Milestone | Done when |
 |---|---|---|
-| M1 | Scaffold | SvelteKit + PWA installable, CSP in place, CI running lint/typecheck/tests. **In review.** |
-| M2 | Import | Untappd export + generic mapper import into Dexie; review queue; idempotent re-import |
+| M1 | Scaffold | SvelteKit + PWA installable, CSP in place, CI running lint/typecheck/tests. **Done.** |
+| M2 | Import | Untappd export + generic mapper import into Dexie; review queue; idempotent re-import. **In review.** XLSX deferred (see §4.1). |
 | M3 | Map & venues | MapLibre map, Overpass venue fetch + cache, visited/unvisited styling |
 | M4 | Travel time | ORS isochrone + matrix, walk/drive toggle, minutes slider, ranked list |
 | M5 | Novelty & NA | Scoring per §4.4, NA tri-state per §4.5 |
