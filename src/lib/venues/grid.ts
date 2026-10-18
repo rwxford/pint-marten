@@ -15,6 +15,17 @@ export function cellId(lat: number, lng: number): string {
 	return `${index(lat)}:${index(lng)}`;
 }
 
+/** Number of cells covering the box, computed without building the list. */
+export function countCells(b: Bbox): number {
+	const rows = index(b.north) - index(b.south) + 1;
+	const cols = index(b.east) - index(b.west) + 1;
+	return rows > 0 && cols > 0 ? rows * cols : 0;
+}
+
+/**
+ * Cell IDs covering the box. Callers must check `countCells` first: a zoomed-out view covers
+ * hundreds of thousands of cells, and building that list would stall the page.
+ */
 export function cellsForBbox(b: Bbox): string[] {
 	const cells: string[] = [];
 	for (let y = index(b.south); y <= index(b.north); y++) {

@@ -22,6 +22,11 @@
 
 	let container = $state<HTMLDivElement>();
 	let map: MapLibreMap | undefined;
+	// `map` isn't reactive, so effects that drive map layers depend on this instead.
+	let mapReady = $state(false);
+	// The selection actually applied to the map layer, read back from MapLibre (also lets tests
+	// confirm the highlight without inspecting the canvas).
+	let highlighted = $state<string | null>(null);
 	let mapError = $state<string | null>(null);
 	let view = $state<View | null>(null);
 	let venues = $state<OsmVenue[]>([]);
@@ -167,15 +172,21 @@
 		map?.easeTo({ center: [v.lng, v.lat] });
 	}
 
+	// Read every dependency before the readiness check so each effect tracks them all, even on
+	// its first run before the map has loaded.
 	$effect(() => {
 		const data = toFeatures();
-		(map?.getSource('venues') as GeoJSONSource | undefined)?.setData(data);
+		if (!mapReady || !map) return;
+		(map.getSource('venues') as GeoJSONSource | undefined)?.setData(data);
 	});
 
 	$effect(() => {
-		if (map?.getLayer('venue-selected')) {
-			map.setFilter('venue-selected', ['==', ['get', 'id'], selectedId ?? '']);
-		}
+		const id = selectedId ?? '';
+		if (!mapReady || !map?.getLayer('venue-selected')) return;
+		map.setFilter('venue-selected', ['==', ['get', 'id'], id]);
+		const filter = map.getFilter('venue-selected');
+		highlighted =
+			Array.isArray(filter) && typeof filter[2] === 'string' && filter[2] ? filter[2] : null;
 	});
 
 	onMount(() => {
@@ -233,6 +244,7 @@
 						const id = e.features?.[0]?.properties?.id;
 						if (typeof id === 'string') selectedId = id;
 					});
+					mapReady = true;
 				});
 				map.on('moveend', async () => {
 					syncViewFromMap();
@@ -251,7 +263,10 @@
 		};
 	});
 
-	onDestroy(() => map?.remove());
+	onDestroy(() => {
+		mapReady = false;
+		map?.remove();
+	});
 </script>
 
 <svelte:head>
@@ -259,7 +274,13 @@
 </svelte:head>
 
 <main class="map-page">
-	<div class="map" bind:this={container} aria-label="Map of nearby venues" role="region">
+	<div
+		class="map"
+		bind:this={container}
+		aria-label="Map of nearby venues"
+		role="region"
+		data-highlighted={highlighted ?? undefined}
+	>
 		{#if mapError}<p class="map-error">{mapError}</p>{/if}
 	</div>
 

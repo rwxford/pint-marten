@@ -49,6 +49,14 @@ describe('loadVenues', () => {
 		expect(tiny.map((v) => v.name)).toEqual(['Test Taproom']);
 	});
 
+	it('returns nothing for a zoomed-out view without enumerating the grid', async () => {
+		await loadVenues(db, box, vi.fn().mockResolvedValue(venues), 0);
+		// Roughly the continental-US view the map opens with: ~400,000 cells.
+		const started = performance.now();
+		expect(await cachedVenues(db, { south: 15, west: -141, north: 61, east: -51 })).toEqual([]);
+		expect(performance.now() - started).toBeLessThan(50);
+	});
+
 	it('refuses areas that are too large', async () => {
 		const fetcher = vi.fn();
 		await expect(

@@ -75,6 +75,11 @@ test('finds venues near me and marks the ones I have visited', async ({ page }) 
 
 	await list.getByRole('button', { name: /Bottle Stop/ }).click();
 	await expect(page.getByRole('region', { name: 'Selected venue' })).toContainText('Bottle shop');
+	// The map's highlight layer follows the selection.
+	await expect(page.getByRole('region', { name: 'Map of nearby venues' })).toHaveAttribute(
+		'data-highlighted',
+		'node/108'
+	);
 	// Selecting recenters the map but distances stay measured from the user.
 	await expect(page.getByText('Distances from your location.')).toBeVisible();
 	await expect(list.getByRole('listitem').first()).toContainText('Garden Hall');
