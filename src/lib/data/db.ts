@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type { Category, ImportSource } from '../import/types';
+import type { OsmVenue } from '../venues/types';
 
 export interface Producer {
 	id: number;
@@ -85,6 +86,12 @@ export interface Alias {
 	targetId: number;
 }
 
+/** When a venue-search grid cell was last fetched from OpenStreetMap. */
+export interface OsmCell {
+	cell: string;
+	fetchedAt: number;
+}
+
 export type PintMartenDB = Dexie & {
 	producers: EntityTable<Producer, 'id'>;
 	drinks: EntityTable<Drink, 'id'>;
@@ -93,6 +100,8 @@ export type PintMartenDB = Dexie & {
 	importJobs: EntityTable<ImportJob, 'id'>;
 	reviewItems: EntityTable<ReviewItem, 'id'>;
 	aliases: EntityTable<Alias, 'key'>;
+	osmVenues: EntityTable<OsmVenue, 'osmId'>;
+	osmCells: EntityTable<OsmCell, 'cell'>;
 };
 
 export function openDatabase(name = 'pint-marten'): PintMartenDB {
@@ -106,6 +115,7 @@ export function openDatabase(name = 'pint-marten'): PintMartenDB {
 		reviewItems: '++id, status, [kind+newId], [kind+candidateId]'
 	});
 	db.version(2).stores({ aliases: '&key, [kind+targetId]' });
+	db.version(3).stores({ osmVenues: '&osmId, cell', osmCells: '&cell' });
 	return db;
 }
 

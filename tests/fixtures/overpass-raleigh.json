@@ -1,0 +1,73 @@
+{
+	"version": 0.6,
+	"generator": "Overpass API (synthetic test fixture)",
+	"elements": [
+		{
+			"type": "node",
+			"id": 101,
+			"lat": 35.7797,
+			"lon": -78.6381,
+			"tags": {
+				"amenity": "bar",
+				"name": "Test Taproom",
+				"opening_hours": "Mo-Su 12:00-23:00",
+				"website": "https://example.com/taproom"
+			}
+		},
+		{
+			"type": "way",
+			"id": 202,
+			"center": { "lat": 35.781, "lon": -78.64 },
+			"tags": { "craft": "brewery", "name": "Fictional Fox Brewing Company" }
+		},
+		{
+			"type": "node",
+			"id": 103,
+			"lat": 35.7775,
+			"lon": -78.6355,
+			"tags": { "amenity": "pub", "name": "The Corner Pub", "website": "javascript:alert(1)" }
+		},
+		{ "type": "node", "id": 104, "lat": 35.778, "lon": -78.637, "tags": { "amenity": "bar" } },
+		{
+			"type": "node",
+			"id": 105,
+			"lat": 35.7825,
+			"lon": -78.6425,
+			"tags": { "craft": "cider", "name": "Orchard Hollow Cider" }
+		},
+		{
+			"type": "node",
+			"id": 106,
+			"lat": 35.7765,
+			"lon": -78.6405,
+			"tags": { "craft": "winery", "name": "Golden Comb Meadery" }
+		},
+		{
+			"type": "node",
+			"id": 107,
+			"lat": 35.7768,
+			"lon": -78.6402,
+			"tags": { "craft": "winery", "name": "Vine and Barrel Winery" }
+		},
+		{
+			"type": "node",
+			"id": 108,
+			"lat": 35.7801,
+			"lon": -78.6366,
+			"tags": { "shop": "alcohol", "name": "Bottle Stop" }
+		},
+		{
+			"type": "node",
+			"id": 109,
+			"lat": 35.7802,
+			"lon": -78.6367,
+			"tags": { "amenity": "cafe", "name": "Random Cafe" }
+		},
+		{
+			"type": "relation",
+			"id": 310,
+			"center": { "lat": 35.7788, "lon": -78.6391 },
+			"tags": { "amenity": "biergarten", "name": "Garden Hall" }
+		}
+	]
+}

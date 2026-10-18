@@ -165,6 +165,20 @@ with the hybrid noted in style); everything else → beer. The user can correct 
   during M3), `shop=alcohol|beverages`, and optionally
   `shop=supermarket|convenience` (relevant for the NA filter — see §4.5).
 
+**M3 implementation notes**
+
+- Venue searches are explicit ("Near me" or "Search this area", zoom 12+) rather than on every
+  pan, to stay within the public Overpass server's fair-use limits. Results are cached per
+  0.05° grid cell (~5.5 km) for 7 days; one search covers at most 25 cells (~20 km square).
+- A venue counts as **visited** when an imported venue is within 150 m and the names match
+  after ignoring generic words ("Taproom", "Brewing Co.", "Bar"…): equal, one containing the
+  other (4+ characters), or bigram similarity ≥ 0.6.
+- Wineries are included only when their name says mead or cider.
+- MapLibre's worker is served as a same-origin file (`setWorkerUrl`), so the CSP needs no
+  `blob:` worker source. MapLibre (~1 MB) loads only on the map page.
+- Distances are measured from your location after "Near me", otherwise from the center of the
+  last search.
+
 ### 4.4 "New to me" ranking
 
 Each venue gets a novelty score:
@@ -471,8 +485,8 @@ current limits). For a single user this is plenty. Results are cached by
 | # | Milestone | Done when |
 |---|---|---|
 | M1 | Scaffold | SvelteKit + PWA installable, CSP in place, CI running lint/typecheck/tests. **Done.** |
-| M2 | Import | Untappd export + generic mapper import into Dexie; review queue; idempotent re-import. **In review.** XLSX deferred (see §4.1). |
-| M3 | Map & venues | MapLibre map, Overpass venue fetch + cache, visited/unvisited styling |
+| M2 | Import | Untappd export + generic mapper import into Dexie; review queue; idempotent re-import. **Done.** XLSX deferred (see §4.1). |
+| M3 | Map & venues | MapLibre map, Overpass venue fetch + cache, visited/unvisited styling. **In review.** |
 | M4 | Travel time | ORS isochrone + matrix, walk/drive toggle, minutes slider, ranked list |
 | M5 | Novelty & NA | Scoring per §4.4, NA tri-state per §4.5 |
 | M6 | Sightings | Paste/type menu parser, freshness |
