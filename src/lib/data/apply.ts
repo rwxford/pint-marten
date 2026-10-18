@@ -2,6 +2,7 @@ import { drinkKey, normalizeText, producerKey, similarity } from '../import/norm
 import type { ImportRecord, ParsedImport } from '../import/types';
 import { dateToTimestamp } from '../import/values';
 import type { Drink, PintMartenDB, Producer, Venue } from './db';
+import { enrichDrink } from './enrich';
 
 /** Names at least this similar (but not identical) are queued for the user to review. */
 export const PRODUCER_REVIEW_THRESHOLD = 0.88;
@@ -20,6 +21,13 @@ export interface ApplyResult {
 function sourceKey(source: string, id: string | null): string | null {
 	return id ? `${source}:${id}` : null;
 }
+
+export const aliasKey = {
+	drinkName: (producerId: number, key: string) => `drink:name:${producerId}|${key}`,
+	drinkSource: (sk: string) => `drink:source:${sk}`,
+	producerName: (key: string) => `producer:name:${key}`,
+	producerSource: (sk: string) => `producer:source:${sk}`
+};
 
 function venueNameKey(name: string, city: string | null): string {
 	return `${normalizeText(name)}|${normalizeText(city ?? '')}`;
@@ -51,7 +59,8 @@ export async function applyImport(
 		db.venues,
 		db.consumptions,
 		db.importJobs,
-		db.reviewItems
+		db.reviewItems,
+		db.aliases
 	];
 	return db.transaction('rw', tables, async () => {
 		const now = new Date().toISOString();
@@ -68,6 +77,11 @@ export async function applyImport(
 		const drinks = await db.drinks.toArray();
 		const venues = await db.venues.toArray();
 		const seenRows = new Set((await db.consumptions.orderBy('rowKey').keys()) as string[]);
+		const aliases = new Map((await db.aliases.toArray()).map((a) => [a.key, a.targetId]));
+		const producerById = new Map(producers.map((p) => [p.id, p]));
+		const drinkById = new Map(drinks.map((d) => [d.id, d]));
+		const aliasedProducer = (key: string) => producerById.get(aliases.get(key) ?? -1);
+		const aliasedDrink = (key: string) => drinkById.get(aliases.get(key) ?? -1);
 
 		const producerBySource = new Map(
 			producers.filter((p) => p.sourceKey).map((p) => [p.sourceKey!, p])
@@ -111,10 +125,12 @@ export async function applyImport(
 		const resolveProducer = async (rec: ImportRecord): Promise<Producer> => {
 			const sk = sourceKey(parsed.source, rec.producer.sourceId);
 			const key = producerKey(rec.producer.name);
-			const bySource = sk ? producerBySource.get(sk) : undefined;
+			const bySource = sk
+				? (producerBySource.get(sk) ?? aliasedProducer(aliasKey.producerSource(sk)))
+				: undefined;
 			if (bySource) return bySource;
 
-			const byKey = producerByKey.get(key);
+			const byKey = producerByKey.get(key) ?? aliasedProducer(aliasKey.producerName(key));
 			if (byKey && (!sk || !byKey.sourceKey || byKey.sourceKey === sk)) {
 				if (sk && !byKey.sourceKey) {
 					byKey.sourceKey = sk;
@@ -141,6 +157,7 @@ export async function applyImport(
 				country: rec.producer.country
 			};
 			const created: Producer = { id: await db.producers.add(fields), ...fields };
+			producerById.set(created.id, created);
 			result.newProducers++;
 			if (sk) producerBySource.set(sk, created);
 			if (!producerByKey.has(key)) producerByKey.set(key, created);
@@ -151,13 +168,19 @@ export async function applyImport(
 		const resolveDrink = async (rec: ImportRecord, producer: Producer): Promise<Drink> => {
 			const sk = sourceKey(parsed.source, rec.drink.sourceId);
 			const key = drinkKey(rec.drink.name);
+			// A source-ID match (direct or via alias) is authoritative. A name match only counts
+			// when it can't contradict the source ID.
+			const bySource = sk
+				? (drinkBySource.get(sk) ?? aliasedDrink(aliasKey.drinkSource(sk)))
+				: undefined;
+			const byName =
+				drinkByKey.get(`${producer.id}|${key}`) ??
+				aliasedDrink(aliasKey.drinkName(producer.id, key));
 			const existing =
-				(sk ? drinkBySource.get(sk) : undefined) ?? drinkByKey.get(`${producer.id}|${key}`);
-			if (existing && (!sk || !existing.sourceKey || existing.sourceKey === sk)) {
-				const patch: Partial<Drink> = {};
-				if (sk && !existing.sourceKey) patch.sourceKey = sk;
-				if (existing.style === null && rec.drink.style) patch.style = rec.drink.style;
-				if (existing.abv === null && rec.drink.abv !== null) patch.abv = rec.drink.abv;
+				bySource ??
+				(byName && (!sk || !byName.sourceKey || byName.sourceKey === sk) ? byName : undefined);
+			if (existing) {
+				const patch = enrichDrink(existing, { ...rec.drink, sourceKey: sk });
 				if (Object.keys(patch).length) {
 					Object.assign(existing, patch);
 					await db.drinks.update(existing.id, patch);
@@ -184,6 +207,7 @@ export async function applyImport(
 				isNA: rec.drink.isNA
 			};
 			const created: Drink = { id: await db.drinks.add(fields), ...fields };
+			drinkById.set(created.id, created);
 			result.newDrinks++;
 			if (sk) drinkBySource.set(sk, created);
 			if (!drinkByKey.has(`${producer.id}|${key}`))

@@ -70,13 +70,18 @@ security side and boarding time.
 
 - CSV starts with a UTF-8 byte-order mark; JSON is a list of objects with the same keys, but
   `flavor_profiles` and `tagged_friends` are arrays and numbers are numeric.
-- `beer_abv` of **0 means "unknown"**, not non-alcoholic (e.g., many pale lagers are listed at 0).
-  Real NA beers are listed at 0.1–0.5% under ordinary styles (e.g., "IPA - New England / Hazy").
+- `beer_abv` of **0 is ambiguous.** Genuine 0.0% beers (Heineken 0.0, Guinness 0.0, Peroni
+  "0,0% Senza Alcol") and beers whose ABV was never entered (mostly brewpub house beers) both
+  appear as 0. Rule: 0 is kept as a real 0.0 when the name or style carries NA wording ("0.0",
+  "0,0", "non-alcoholic", "alcohol-free", "senza alcol", "sin alcohol", "sans alcool",
+  "alkoholfrei"); otherwise it's stored as unknown. Low-ABV NA beers are listed at 0.1–0.5%
+  under ordinary styles (e.g., "IPA - New England / Hazy").
 - `venue_id` of 0 means no venue was tagged (home, etc.).
 - `created_at` is ISO 8601 with a UTC offset; it's stored as given.
-- Styles include non-beer drinks: hard seltzer, kombucha, sake, RTD (ready-to-drink) cocktails,
-  sodas and sparkling water. These are imported with category **other**, hidden by default in
-  search. "Barleywine" and "Wheat Wine" are beer styles.
+- Styles include non-beer drinks. Categories: **beer, cider, mead, seltzer** (any style with
+  "seltzer", including RTD vodka seltzers), **kombucha** (hard or NA), and **other** for
+  everything else (sake, RTD (ready-to-drink) cocktails, hard teas, sodas, sparkling water).
+  "Barleywine" and "Wheat Wine" are beer styles.
 - **Data minimization:** only drink, producer, venue, date, rating and serving type are kept.
   Comments, photos, tagged friends, toasts, purchase venue and URLs are dropped at parse time.
 
@@ -102,8 +107,13 @@ saved as CSV in the meantime.
   automatically; near matches (string-similarity ≥ threshold) go to a review queue rather
   than merging silently.
 - Re-importing the same file is idempotent (same source row → same record). Rows without a
-  source ID get a fingerprint of their mapped values plus an occurrence number, so two
-  identical rows (two pints of the same beer on the same day) stay separate.
+  source ID get a fingerprint of all their mapped values (including venue city, region,
+  country and coordinates) plus an occurrence number, so two identical rows (two pints of the
+  same beer on the same day) stay separate.
+- When a later import or a review merge fills in a drink's missing style or ABV, its category
+  and NA flag are recomputed.
+- Merging in the review queue records the merged-away name (and source ID) as an **alias**, so
+  later imports using that name land on the surviving record instead of re-asking.
 - Two records that both carry the same app's IDs are never queued for review: that app has
   already decided they're different.
 - Venue matching from import → OpenStreetMap: within 150 m **and** name similarity above
@@ -115,7 +125,9 @@ saved as CSV in the meantime.
 All data lives on-device in IndexedDB (the browser's built-in database).
 
 ```
-Drink       { id, producerId, name, category: beer|cider|mead, style, abv, isNA, sourceIds[] }
+Drink       { id, producerId, name, category: beer|cider|mead|seltzer|kombucha|other,
+              style, abv, isNA, sourceKey }
+Alias       { key, kind: drink|producer, targetId }   // merged-away names / source IDs
 Producer    { id, name, kind: brewery|cidery|meadery|mixed, city, region, country, osmId? }
 Venue       { id, osmId?, airportCode?, name, kind, lat, lng, tags, lastFetched }
 Consumption { id, drinkId, venueId?, date, rating?, source, sourceRowHash }

@@ -1,6 +1,12 @@
 import { categorize, isNonAlcoholic } from './category';
 import { cleanString } from './normalize';
-import type { Category, ImportRecord, ParsedImport, RowError } from './types';
+import {
+	CATEGORIES,
+	type Category,
+	type ImportRecord,
+	type ParsedImport,
+	type RowError
+} from './types';
 import {
 	guessDateOrder,
 	parseAbv,
@@ -15,7 +21,7 @@ export const FIELDS = [
 	{ key: 'producer', label: 'Brewery / cidery / meadery', required: true },
 	{ key: 'style', label: 'Style', required: false },
 	{ key: 'abv', label: 'ABV %', required: false },
-	{ key: 'category', label: 'Category (beer/cider/mead)', required: false },
+	{ key: 'category', label: 'Category (beer, cider, mead…)', required: false },
 	{ key: 'venue', label: 'Venue name', required: false },
 	{ key: 'city', label: 'Venue city', required: false },
 	{ key: 'region', label: 'Venue state / region', required: false },
@@ -90,7 +96,7 @@ export function missingRequired(mapping: ColumnMapping): string[] {
 
 function parseCategory(value: string | null): Category | null {
 	const v = value?.toLowerCase();
-	return v === 'beer' || v === 'cider' || v === 'mead' || v === 'other' ? v : null;
+	return (CATEGORIES as readonly string[]).includes(v ?? '') ? (v as Category) : null;
 }
 
 /** Stable ID from the mapped values, so re-importing the same spreadsheet adds nothing new. */
@@ -159,7 +165,20 @@ export function applyMapping(
 			: null;
 		const rating = parseRating(get(row, 'rating'));
 
-		const fingerprint = rowFingerprint([producerName, name, date, venueName, rating]);
+		// Every value that distinguishes one check-in from another goes into the fingerprint, so
+		// the same beer at same-named venues in different places isn't mistaken for a re-import.
+		const fingerprint = rowFingerprint([
+			producerName,
+			name,
+			date,
+			rating,
+			venue?.name ?? null,
+			venue?.city ?? null,
+			venue?.region ?? null,
+			venue?.country ?? null,
+			venue?.lat ?? null,
+			venue?.lng ?? null
+		]);
 		const occurrence = (occurrences.get(fingerprint) ?? 0) + 1;
 		occurrences.set(fingerprint, occurrence);
 

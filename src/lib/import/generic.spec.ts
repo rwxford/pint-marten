@@ -88,3 +88,21 @@ describe('applyMapping', () => {
 		expect(r.records[0].drink.category).toBe('cider');
 	});
 });
+
+describe('row fingerprints', () => {
+	const m = guessMapping(['Beer', 'Brewery', 'Location', 'City', 'Date']);
+	const opts = { dateOrder: 'mdy' as const };
+
+	it('tell apart same-named venues in different places', () => {
+		const a = applyMapping([['Lager', 'Maker', 'Taproom', 'Raleigh', '5/1/2024']], m, opts);
+		const b = applyMapping([['Lager', 'Maker', 'Taproom', 'Denver', '5/1/2024']], m, opts);
+		expect(a.records[0].sourceRowId).not.toBe(b.records[0].sourceRowId);
+	});
+
+	it('tell apart coordinates when names match', () => {
+		const mc = guessMapping(['Beer', 'Brewery', 'Location', 'Lat', 'Lng']);
+		const a = applyMapping([['Lager', 'Maker', 'Taproom', '35.1', '-78.1']], mc, opts);
+		const b = applyMapping([['Lager', 'Maker', 'Taproom', '39.7', '-104.9']], mc, opts);
+		expect(a.records[0].sourceRowId).not.toBe(b.records[0].sourceRowId);
+	});
+});

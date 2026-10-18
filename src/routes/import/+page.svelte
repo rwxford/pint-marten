@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { applyImport, type ApplyResult } from '#lib/data/apply.ts';
 	import { getDb } from '#lib/data/db.ts';
 	import type { FileParseResult } from '#lib/import/file.ts';
@@ -33,7 +33,11 @@
 
 	let ui = $state<State>({ step: 'pick' });
 	let worker: Worker | undefined;
+	// The page is prerendered, so the file picker is visible before the app has loaded. Keep it
+	// disabled until then so a file chosen early isn't silently ignored.
+	let ready = $state(false);
 
+	onMount(() => (ready = true));
 	onDestroy(() => worker?.terminate());
 
 	function onFile(event: Event) {
@@ -104,11 +108,12 @@
 		{#if ui.step === 'error'}
 			<p class="error" role="alert">{ui.message}</p>
 		{/if}
-		<label class="button button-primary file">
+		<label class="button button-primary file" class:disabled={!ready}>
 			Choose file
 			<input
 				type="file"
 				accept=".csv,.tsv,.txt,.json,text/csv,application/json"
+				disabled={!ready}
 				onchange={onFile}
 			/>
 		</label>
@@ -277,6 +282,11 @@
 		width: 1px;
 		height: 1px;
 		opacity: 0;
+	}
+
+	.file.disabled {
+		opacity: 0.5;
+		cursor: progress;
 	}
 
 	.file:focus-within {

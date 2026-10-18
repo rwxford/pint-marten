@@ -1,4 +1,4 @@
-import { categorize, isNonAlcoholic } from './category';
+import { categorize, hasNaWording, isNonAlcoholic } from './category';
 import { cleanString } from './normalize';
 import type { ImportRecord, ParsedImport, RowError } from './types';
 import { parseAbv, parseCoords, parseDate, parseRating } from './values';
@@ -18,7 +18,9 @@ type Row = Record<string, unknown>;
  *
  * Only what the app uses is kept. Comments, photos, tagged friends, toasts and URLs are dropped.
  * Untappd quirks handled here:
- * - `beer_abv` of 0 means "unknown", not non-alcoholic (real NA beers are listed at 0.1–0.5%).
+ * - `beer_abv` of 0 is ambiguous: real 0.0% beers ("Heineken 0.0") and beers whose ABV was never
+ *   entered both appear as 0. It's kept as 0 only when the name or style says non-alcoholic;
+ *   otherwise it's treated as unknown.
  * - `venue_id` of 0 means no venue was tagged.
  */
 export function parseUntappdRows(rows: readonly Row[]): ParsedImport {
@@ -37,7 +39,7 @@ export function parseUntappdRows(rows: readonly Row[]): ParsedImport {
 
 		const style = cleanString(row.beer_type, 100);
 		const rawAbv = parseAbv(row.beer_abv);
-		const abv = rawAbv === 0 ? null : rawAbv;
+		const abv = rawAbv === 0 && !hasNaWording(style, name) ? null : rawAbv;
 
 		const venueId = cleanString(row.venue_id);
 		const venueName = cleanString(row.venue_name);

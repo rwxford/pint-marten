@@ -29,7 +29,8 @@
 </dl>
 <p class="muted">
 	{count(stats.byCategory.beer, 'beer')} · {count(stats.byCategory.cider, 'cider')} ·
-	{count(stats.byCategory.mead, 'mead')} · {n(stats.byCategory.other)} other ·
+	{count(stats.byCategory.mead, 'mead')} · {count(stats.byCategory.seltzer, 'seltzer')} ·
+	{count(stats.byCategory.kombucha, 'kombucha', 'kombuchas')} · {n(stats.byCategory.other)} other ·
 	{n(stats.naDrinks)} non-alcoholic
 	<br />
 	{day(stats.firstDate)} to {day(stats.lastDate)}

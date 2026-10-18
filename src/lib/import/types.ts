@@ -1,4 +1,6 @@
-export type Category = 'beer' | 'cider' | 'mead' | 'other';
+export const CATEGORIES = ['beer', 'cider', 'mead', 'seltzer', 'kombucha', 'other'] as const;
+
+export type Category = (typeof CATEGORIES)[number];
 
 export type ImportSource = 'untappd' | 'generic';
 

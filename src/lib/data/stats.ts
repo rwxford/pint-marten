@@ -1,4 +1,4 @@
-import type { Category } from '../import/types';
+import { CATEGORIES, type Category } from '../import/types';
 import type { PintMartenDB } from './db';
 
 export interface Stats {
@@ -15,7 +15,7 @@ export interface Stats {
 
 export async function getStats(db: PintMartenDB): Promise<Stats> {
 	const drinks = await db.drinks.toArray();
-	const byCategory: Record<Category, number> = { beer: 0, cider: 0, mead: 0, other: 0 };
+	const byCategory = Object.fromEntries(CATEGORIES.map((c) => [c, 0])) as Record<Category, number>;
 	for (const d of drinks) byCategory[d.category]++;
 	const first = await db.consumptions.orderBy('ts').first();
 	const last = await db.consumptions.orderBy('ts').last();

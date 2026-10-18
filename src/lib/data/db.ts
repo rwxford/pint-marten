@@ -74,6 +74,17 @@ export interface ReviewItem {
 	createdAt: string;
 }
 
+/**
+ * A name or source ID that was merged into another record. Lookups consult aliases after direct
+ * matches, so a merged-away name isn't recreated (and re-reviewed) by the next import.
+ */
+export interface Alias {
+	/** e.g. "drink:name:<producerId>|<key>", "drink:source:untappd:501", "producer:name:<key>". */
+	key: string;
+	kind: 'drink' | 'producer';
+	targetId: number;
+}
+
 export type PintMartenDB = Dexie & {
 	producers: EntityTable<Producer, 'id'>;
 	drinks: EntityTable<Drink, 'id'>;
@@ -81,6 +92,7 @@ export type PintMartenDB = Dexie & {
 	consumptions: EntityTable<Consumption, 'id'>;
 	importJobs: EntityTable<ImportJob, 'id'>;
 	reviewItems: EntityTable<ReviewItem, 'id'>;
+	aliases: EntityTable<Alias, 'key'>;
 };
 
 export function openDatabase(name = 'pint-marten'): PintMartenDB {
@@ -93,6 +105,7 @@ export function openDatabase(name = 'pint-marten'): PintMartenDB {
 		importJobs: '++id, importedAt',
 		reviewItems: '++id, status, [kind+newId], [kind+candidateId]'
 	});
+	db.version(2).stores({ aliases: '&key, [kind+targetId]' });
 	return db;
 }
 

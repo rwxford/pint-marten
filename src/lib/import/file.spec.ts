@@ -15,7 +15,7 @@ describe('Untappd exports', () => {
 
 	it('parses CSV and JSON to identical records', () => {
 		if (csv.kind !== 'records' || json.kind !== 'records') throw new Error('not records');
-		expect(csv.parsed.records).toHaveLength(8);
+		expect(csv.parsed.records).toHaveLength(11);
 		expect(csv.parsed.errors).toEqual([]);
 		expect(json.parsed.records).toEqual(csv.parsed.records);
 	});
@@ -27,8 +27,12 @@ describe('Untappd exports', () => {
 		expect(byId.get('90001')?.drink.name).toBe('Marten Haze');
 		// venue_id 0 means no venue.
 		expect(byId.get('90002')?.venue).toBeNull();
-		// ABV 0 is unknown, not non-alcoholic.
+		// ABV 0 without NA wording is unknown, not non-alcoholic...
 		expect(byId.get('90003')?.drink).toMatchObject({ abv: null, isNA: false });
+		// ...but with NA wording it's a real 0.0% beer.
+		expect(byId.get('90009')?.drink).toMatchObject({ abv: 0, isNA: true, category: 'beer' });
+		expect(byId.get('90010')?.drink).toMatchObject({ category: 'seltzer', isNA: false });
+		expect(byId.get('90011')?.drink).toMatchObject({ category: 'kombucha', isNA: false });
 		// Real NA beers have a small positive ABV.
 		expect(byId.get('90004')?.drink).toMatchObject({ abv: 0.4, isNA: true, category: 'beer' });
 		expect(byId.get('90004')?.rating).toBeNull();

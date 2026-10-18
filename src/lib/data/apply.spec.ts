@@ -34,26 +34,33 @@ describe('applyImport', () => {
 	it('imports an Untappd export', async () => {
 		const r = await applyImport(db, untappd('untappd-sample.csv'), 'export.csv');
 		expect(r).toMatchObject({
-			added: 8,
+			added: 11,
 			duplicates: 0,
-			newDrinks: 7,
+			newDrinks: 10,
 			newProducers: 6,
 			newVenues: 3,
 			reviewItems: 0
 		});
 		const stats = await getStats(db);
-		expect(stats).toMatchObject({ consumptions: 8, drinks: 7, producers: 6, venues: 3 });
-		expect(stats.byCategory).toEqual({ beer: 4, cider: 1, mead: 1, other: 1 });
-		expect(stats.naDrinks).toBe(2);
+		expect(stats).toMatchObject({ consumptions: 11, drinks: 10, producers: 6, venues: 3 });
+		expect(stats.byCategory).toEqual({
+			beer: 5,
+			cider: 1,
+			mead: 1,
+			seltzer: 1,
+			kombucha: 1,
+			other: 1
+		});
+		expect(stats.naDrinks).toBe(3);
 	});
 
 	it('is idempotent across re-imports and formats', async () => {
 		await applyImport(db, untappd('untappd-sample.csv'), 'export.csv');
 		const again = await applyImport(db, untappd('untappd-sample.csv'), 'export.csv');
 		const json = await applyImport(db, untappd('untappd-sample.json'), 'export.json');
-		expect(again).toMatchObject({ added: 0, duplicates: 8 });
-		expect(json).toMatchObject({ added: 0, duplicates: 8, newDrinks: 0 });
-		expect((await getStats(db)).consumptions).toBe(8);
+		expect(again).toMatchObject({ added: 0, duplicates: 11 });
+		expect(json).toMatchObject({ added: 0, duplicates: 11, newDrinks: 0 });
+		expect((await getStats(db)).consumptions).toBe(11);
 	});
 
 	it('matches spreadsheet rows to existing records by name and queues near-matches', async () => {
@@ -101,6 +108,93 @@ describe('applyImport', () => {
 		});
 		const producer = await db.producers.get(drinks[0].producerId);
 		expect(producer?.sourceKey).toBe('untappd:301');
+	});
+});
+
+describe('regressions', () => {
+	const m = guessMapping(['Beer', 'Brewery', 'Style', 'ABV', 'Location', 'City', 'Date']);
+	const opts = { dateOrder: 'mdy' as const };
+	const sheet = (rows: string[][]) => applyMapping(rows, m, opts);
+
+	it('keeps check-ins at same-named venues in different cities from separate files', async () => {
+		await applyImport(
+			db,
+			sheet([['Lager', 'Maker', '', '', 'Taproom', 'Raleigh', '5/1/2024']]),
+			'a.csv'
+		);
+		const r = await applyImport(
+			db,
+			sheet([['Lager', 'Maker', '', '', 'Taproom', 'Denver', '5/1/2024']]),
+			'b.csv'
+		);
+		expect(r).toMatchObject({ added: 1, duplicates: 0, newVenues: 1 });
+		expect((await getStats(db)).consumptions).toBe(2);
+	});
+
+	it('recomputes category and NA when a later import supplies style and ABV', async () => {
+		await applyImport(db, sheet([['Mystery Pour', 'Orchard Folk', '', '', '', '', '']]), 'a.csv');
+		let [drink] = await db.drinks.toArray();
+		expect(drink).toMatchObject({ category: 'beer', isNA: false, abv: null });
+
+		await applyImport(
+			db,
+			sheet([['Mystery Pour', 'Orchard Folk', 'Cider - Dry', '0.4', '', '', '1/2/2025']]),
+			'b.csv'
+		);
+		[drink] = await db.drinks.toArray();
+		expect(drink).toMatchObject({ category: 'cider', isNA: true, abv: 0.4, style: 'Cider - Dry' });
+	});
+
+	it('recomputes category and NA when a review merge supplies style and ABV', async () => {
+		await applyImport(db, sheet([['Mystery Pour', 'Orchard Folk', '', '', '', '', '']]), 'a.csv');
+		await applyImport(
+			db,
+			sheet([['Mystery Pours', 'Orchard Folk', 'Mead - Session / Short', '0.3', '', '', '']]),
+			'b.csv'
+		);
+		const [entry] = await openReviews(db);
+		// Merge the styled newcomer into the unstyled original.
+		expect(entry).toMatchObject({ newName: 'Mystery Pours', candidateName: 'Mystery Pour' });
+		await mergeReview(db, entry.item.id);
+		const [drink] = await db.drinks.toArray();
+		expect(drink).toMatchObject({ name: 'Mystery Pour', category: 'mead', isNA: true });
+	});
+
+	it('remembers merged drink names so later imports reuse the survivor', async () => {
+		await applyImport(db, untappd('untappd-sample.csv'), 'export.csv');
+		await applyImport(db, generic(), 'g.csv');
+		const [entry] = await openReviews(db);
+		await mergeReview(db, entry.item.id);
+
+		const r = await applyImport(
+			db,
+			sheet([['Marten Hazey', 'Fictional Fox Brewing', '', '', '', '', '9/9/2025']]),
+			'later.csv'
+		);
+		expect(r).toMatchObject({ added: 1, newDrinks: 0, reviewItems: 0 });
+		const haze = await db.drinks.get(entry.item.candidateId);
+		expect(await db.consumptions.where('drinkId').equals(haze!.id).count()).toBe(5);
+	});
+
+	it('remembers merged producer names so later imports reuse the survivor', async () => {
+		await applyImport(db, untappd('untappd-sample.csv'), 'export.csv');
+		await applyImport(
+			db,
+			sheet([['Brand New Beer', 'Fictionall Fox', '', '', '', '', '']]),
+			'typo.csv'
+		);
+		const review = (await openReviews(db)).find((e) => e.item.kind === 'producer');
+		await mergeReview(db, review!.item.id);
+
+		const r = await applyImport(
+			db,
+			sheet([
+				['Another Beer', 'Fictionall Fox', '', '', '', '', '3/3/2026'],
+				['Brand New Beer', 'Fictionall Fox', '', '', '', '', '3/4/2026']
+			]),
+			'typo-again.csv'
+		);
+		expect(r).toMatchObject({ added: 2, newProducers: 0, newDrinks: 1, reviewItems: 0 });
 	});
 });
 

@@ -4,7 +4,9 @@ const fixture = (name: string) => `tests/fixtures/${name}`;
 
 async function chooseFile(page: Page, name: string) {
 	await page.goto('/import');
-	await page.locator('input[type="file"]').setInputFiles(fixture(name));
+	const input = page.locator('input[type="file"]');
+	await expect(input).toBeEnabled();
+	await input.setInputFiles(fixture(name));
 }
 
 function stat(page: Page, label: string) {
@@ -21,33 +23,35 @@ test('imports an Untappd export and ignores re-imports', async ({ page }) => {
 
 	await chooseFile(page, 'untappd-sample.csv');
 	await expect(page.getByRole('heading', { name: 'Untappd export' })).toBeVisible();
-	await expect(stat(page, 'Check-ins')).toHaveText('8');
-	await page.getByRole('button', { name: 'Import 8 check-ins' }).click();
+	await expect(stat(page, 'Check-ins')).toHaveText('11');
+	await page.getByRole('button', { name: 'Import 11 check-ins' }).click();
 
 	await expect(page.getByRole('heading', { name: 'Imported' })).toBeVisible();
-	await expect(stat(page, 'Added')).toHaveText('8');
+	await expect(stat(page, 'Added')).toHaveText('11');
 	await page.getByRole('link', { name: 'Done' }).click();
 
 	await expect(page.getByRole('heading', { name: 'Your history' })).toBeVisible();
-	await expect(stat(page, 'Check-ins')).toHaveText('8');
+	await expect(stat(page, 'Check-ins')).toHaveText('11');
 	await expect(stat(page, 'Venues')).toHaveText('3');
 	await expect(
-		page.getByText('4 beers · 1 cider · 1 mead · 1 other · 2 non-alcoholic')
+		page.getByText(
+			'5 beers · 1 cider · 1 mead · 1 seltzer · 1 kombucha · 1 other · 3 non-alcoholic'
+		)
 	).toBeVisible();
 
 	// The JSON export holds the same check-ins, so nothing new is added.
 	await chooseFile(page, 'untappd-sample.json');
-	await page.getByRole('button', { name: 'Import 8 check-ins' }).click();
+	await page.getByRole('button', { name: 'Import 11 check-ins' }).click();
 	await expect(stat(page, 'Added')).toHaveText('0');
-	await expect(stat(page, 'Already had')).toHaveText('8');
+	await expect(stat(page, 'Already had')).toHaveText('11');
 
 	expect(problems).toEqual([]);
 });
 
 test('maps spreadsheet columns and reviews a near-duplicate', async ({ page }) => {
 	await chooseFile(page, 'untappd-sample.csv');
-	await page.getByRole('button', { name: 'Import 8 check-ins' }).click();
-	await expect(stat(page, 'Added')).toHaveText('8');
+	await page.getByRole('button', { name: 'Import 11 check-ins' }).click();
+	await expect(stat(page, 'Added')).toHaveText('11');
 
 	await page.getByRole('button', { name: 'Import another file' }).click();
 	await page.locator('input[type="file"]').setInputFiles(fixture('generic-sample.csv'));
@@ -75,7 +79,7 @@ test('maps spreadsheet columns and reviews a near-duplicate', async ({ page }) =
 
 test('deletes all data after confirmation', async ({ page }) => {
 	await chooseFile(page, 'untappd-sample.json');
-	await page.getByRole('button', { name: 'Import 8 check-ins' }).click();
+	await page.getByRole('button', { name: 'Import 11 check-ins' }).click();
 	await page.getByRole('link', { name: 'Done' }).click();
 	await expect(page.getByRole('heading', { name: 'Your history' })).toBeVisible();
 
@@ -86,6 +90,7 @@ test('deletes all data after confirmation', async ({ page }) => {
 
 test('explains files it cannot import', async ({ page }) => {
 	await page.goto('/import');
+	await expect(page.locator('input[type="file"]')).toBeEnabled();
 	await page.locator('input[type="file"]').setInputFiles({
 		name: 'notes.json',
 		mimeType: 'application/json',
