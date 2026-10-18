@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # No display name: the check reports as "check", which branch protection on main requires.
   check:
-    name: Lint, typecheck, test
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
