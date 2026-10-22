@@ -178,6 +178,11 @@ with the hybrid noted in style); everything else → beer. The user can correct 
   `blob:` worker source. MapLibre (~1 MB) loads only on the map page.
 - Distances are measured from your location after "Near me", otherwise from the center of the
   last search.
+- **Adding places.** Restaurants and other spots that serve beer but aren't tagged as drinking
+  venues in OSM (e.g. a TGI Friday's) can be added by tapping their label on the base map and
+  choosing "Add as a beer spot". Added places are stored only on the device (`customVenues`),
+  appear in the map and list like OSM venues, and are marked visited by hand ("I've been here")
+  rather than matched against imported check-ins.
 
 ### 4.4 "New to me" ranking
 
@@ -503,6 +508,7 @@ current limits). For a single user this is plenty. Results are cached by
 | 5 | Code license | AGPL-3.0 core; open-core Premium in a separate directory and license, like coder/coder (§9). |
 | 6 | Contribution policy | CLA, enforced by a GitHub Action (§9). |
 | 7 | Product name | **Pint Marten** (§12). |
+| 8 | Places missing from the venue search | Tap a base-map label to add it; local only; visited is set by hand (§4.3). |
 
 ### Still open
 
