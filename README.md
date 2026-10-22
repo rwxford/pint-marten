@@ -12,7 +12,7 @@ your device. Seed it by importing an export from another tracking app or a sprea
 
 ## Development
 
-Requires Node.js 22+ and [pnpm](https://pnpm.io) (version pinned in `package.json`).
+Requires Node.js 22.17+ and [pnpm](https://pnpm.io) (version pinned in `package.json`; `corepack enable` installs it).
 
 ```sh
 pnpm install
@@ -43,6 +43,18 @@ an existing Chromium instead, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its path.
 - **Content Security Policy** is set in `vite.config.ts` and emitted as a `<meta>` tag with
   hashes for SvelteKit's inline bootstrap script. Only `'self'` is allowed today; add a host to
   `connect-src`/`img-src` only when a feature needs it.
+
+## Deployment
+
+The app is a static site, so any static host works. Two are configured:
+
+- **Vercel** (`vercel.json`): build settings, clean URLs and security headers. Connect the repo in
+  Vercel; every pull request gets a preview link.
+- **Cloudflare Pages** (`static/_headers`): set the build command to `pnpm build`, the output
+  directory to `build`, and `NODE_VERSION` to 22.17 or newer.
+
+Both header sets are equivalent and add what a `<meta>` CSP can't (`frame-ancestors`), plus
+nosniff, a strict referrer policy and a permissions policy. Keep them in sync when either changes.
 
 ## License
 
