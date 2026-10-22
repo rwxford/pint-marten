@@ -15,6 +15,16 @@
 	import { formatDistance, locationErrorMessage } from '#lib/map/format.ts';
 	import { nearestToTap, TAP_RADIUS_PX } from '#lib/map/hit.ts';
 	import { AreaTooLargeError, cachedVenues, loadVenues } from '#lib/venues/cache.ts';
+	import {
+		addCustomVenue,
+		asVenue,
+		customVenuesIn,
+		poiKind,
+		removeCustomVenue,
+		setCustomVisited,
+		type NewPlace
+	} from '#lib/venues/custom.ts';
+	import type { CustomVenue } from '#lib/data/db.ts';
 	import { distanceMeters, visitedOsmIds, type KnownVenue } from '#lib/venues/match.ts';
 	import { fetchOverpass, OverpassError } from '#lib/venues/osm.ts';
 	import { VENUE_KIND_LABELS, type Bbox, type OsmVenue } from '#lib/venues/types.ts';
@@ -39,11 +49,18 @@
 	let originShown = $state<string | null>(null);
 	let mapError = $state<string | null>(null);
 	let view = $state<View | null>(null);
-	let venues = $state<OsmVenue[]>([]);
+	let osmVenues = $state<OsmVenue[]>([]);
+	// Places you added yourself, in the current area.
+	let customs = $state<CustomVenue[]>([]);
+	// A labeled place on the base map you tapped, offered for adding.
+	let candidate = $state<NewPlace | null>(null);
+	// Bumped by every add, edit or removal, so a slower area reload that began earlier can't put
+	// back a place you just removed.
+	let customsVersion = 0;
 	// Imported venues with coordinates, for "visited" matching. Searches await this so a fast
 	// tap on "Near me" can't run before history has loaded.
 	let knownLoaded: Promise<KnownVenue[]> = Promise.resolve([]);
-	let visited = $state<Set<string>>(new Set());
+	let osmVisited = $state<Set<string>>(new Set());
 	let status = $state<string | null>(null);
 	let error = $state<string | null>(null);
 	let busy = $state(false);
@@ -52,6 +69,11 @@
 	// Where distances are measured from: your location after "Near me", otherwise the center of
 	// the last search. Selecting a venue moves the map but not this point.
 	let origin = $state<{ lng: number; lat: number; you: boolean } | null>(null);
+
+	const venues = $derived([...osmVenues, ...customs.map(asVenue)]);
+	const visited = $derived(
+		new Set([...osmVisited, ...customs.filter((c) => c.visited).map((c) => c.id)])
+	);
 
 	const canSearch = $derived(!!view && view.zoom >= MIN_SEARCH_ZOOM && !busy);
 
@@ -67,6 +89,7 @@
 	});
 
 	const selected = $derived(venues.find((v) => v.osmId === selectedId) ?? null);
+	const selectedCustom = $derived(customs.find((c) => c.id === selectedId) ?? null);
 
 	function bboxAround(lng: number, lat: number, zoom: number): Bbox {
 		// Roughly the visible area of a phone-sized map at this zoom.
@@ -123,8 +146,15 @@
 	async function showCached() {
 		if (!view) return;
 		const known = await knownLoaded;
-		venues = await cachedVenues(getDb(), view.bbox);
-		visited = visitedOsmIds(venues, known);
+		const db = getDb();
+		const version = customsVersion;
+		const [osm, added] = await Promise.all([
+			cachedVenues(db, view.bbox),
+			customVenuesIn(db, view.bbox)
+		]);
+		osmVenues = osm;
+		if (version === customsVersion) customs = added;
+		osmVisited = visitedOsmIds(osm, known);
 	}
 
 	async function search() {
@@ -136,9 +166,13 @@
 		try {
 			const known = await knownLoaded;
 			const result = await loadVenues(getDb(), view.bbox, (b) => fetchOverpass(b, OVERPASS_URL));
-			venues = result.venues;
-			visited = visitedOsmIds(venues, known);
-			status = `${venues.length} venue${venues.length === 1 ? '' : 's'} in this area${result.fetched ? '' : ' (saved on this device)'}`;
+			osmVenues = result.venues;
+			osmVisited = visitedOsmIds(osmVenues, known);
+			const version = customsVersion;
+			const added = await customVenuesIn(getDb(), view.bbox);
+			if (version === customsVersion) customs = added;
+			const count = venues.length;
+			status = `${count} venue${count === 1 ? '' : 's'} in this area${result.fetched ? '' : ' (saved on this device)'}`;
 		} catch (e) {
 			status = null;
 			error =
@@ -210,7 +244,30 @@
 		if (origin) map?.easeTo({ center: [origin.lng, origin.lat] });
 	}
 
+	async function addCandidate() {
+		if (!candidate) return;
+		customsVersion++;
+		const added = await addCustomVenue(getDb(), candidate);
+		candidate = null;
+		if (!customs.some((c) => c.id === added.id)) customs = [...customs, added];
+		selectedId = added.id;
+	}
+
+	async function toggleVisited(c: CustomVenue) {
+		customsVersion++;
+		await setCustomVisited(getDb(), c.id, !c.visited);
+		customs = customs.map((x) => (x.id === c.id ? { ...x, visited: !c.visited } : x));
+	}
+
+	async function removeSelected(c: CustomVenue) {
+		customsVersion++;
+		await removeCustomVenue(getDb(), c.id);
+		customs = customs.filter((x) => x.id !== c.id);
+		selectedId = null;
+	}
+
 	function select(v: OsmVenue) {
+		candidate = null;
 		selectedId = v.osmId;
 		map?.easeTo({ center: [v.lng, v.lat] });
 	}
@@ -316,23 +373,50 @@
 					// width of the tap instead of requiring a pixel-exact hit.
 					map!.on('click', (e) => {
 						const r = TAP_RADIUS_PX;
-						const near = map!.queryRenderedFeatures(
-							[
-								[e.point.x - r, e.point.y - r],
-								[e.point.x + r, e.point.y + r]
-							],
-							{ layers: ['venue-points'] }
-						);
-						const hit = nearestToTap(
+						const near = map!.queryRenderedFeatures([
+							[e.point.x - r, e.point.y - r],
+							[e.point.x + r, e.point.y + r]
+						]);
+						const onScreen = (f: (typeof near)[number]) => {
+							if (f.geometry.type !== 'Point') return null;
+							const p = map!.project(f.geometry.coordinates as [number, number]);
+							return { f, x: p.x, y: p.y };
+						};
+						const venueHit = nearestToTap(
 							e.point,
 							near.flatMap((f) => {
-								const id = f.properties?.id;
-								if (typeof id !== 'string' || f.geometry.type !== 'Point') return [];
-								const p = map!.project(f.geometry.coordinates as [number, number]);
-								return [{ id, x: p.x, y: p.y }];
+								const s = f.layer.id === 'venue-points' && onScreen(f);
+								return s && typeof f.properties?.id === 'string' ? [s] : [];
 							})
 						);
-						if (hit) selectedId = hit.id;
+						if (venueHit) {
+							selectedId = venueHit.f.properties.id;
+							candidate = null;
+							return;
+						}
+						// Otherwise offer a labeled place from the base map (a restaurant, say) for adding.
+						// OpenFreeMap's places of interest are in the "poi" layer of its vector tiles.
+						const poiHit = nearestToTap(
+							e.point,
+							near.flatMap((f) => {
+								if (f.source === 'venues' || f.source === 'origin') return [];
+								if (f.sourceLayer !== undefined && f.sourceLayer !== 'poi') return [];
+								const s = typeof f.properties?.name === 'string' && onScreen(f);
+								return s ? [s] : [];
+							})
+						);
+						if (!poiHit) {
+							candidate = null;
+							return;
+						}
+						const [lng, lat] = (poiHit.f.geometry as { coordinates: [number, number] }).coordinates;
+						candidate = {
+							name: poiHit.f.properties.name,
+							kind: poiKind(poiHit.f.properties),
+							lat,
+							lng
+						};
+						selectedId = null;
 					});
 					mapReady = true;
 				});
@@ -402,6 +486,21 @@
 			<p class="muted">Zoom in, or tap “Near me”, to search for venues.</p>
 		{/if}
 
+		{#if candidate}
+			<section class="card selected" aria-label="Add a place">
+				<h2>{candidate.name}</h2>
+				<p class="muted">
+					{VENUE_KIND_LABELS[candidate.kind]} · not in the beer venue search
+				</p>
+				<div class="toolbar">
+					<button class="button button-primary" type="button" onclick={addCandidate}>
+						Add as a beer spot
+					</button>
+					<button class="button" type="button" onclick={() => (candidate = null)}>Cancel</button>
+				</div>
+			</section>
+		{/if}
+
 		{#if selected}
 			<section class="card selected" aria-label="Selected venue">
 				<h2>{selected.name}</h2>
@@ -415,6 +514,20 @@
 						<a href={selected.website} rel="noopener noreferrer external" target="_blank">Website</a
 						>
 					</p>
+				{/if}
+				{#if selectedCustom}
+					<p class="muted small">Added by you, saved on this device.</p>
+					<label class="toggle">
+						<input
+							type="checkbox"
+							checked={selectedCustom.visited}
+							onchange={() => toggleVisited(selectedCustom!)}
+						/>
+						I’ve been here
+					</label>
+					<button class="button" type="button" onclick={() => removeSelected(selectedCustom!)}>
+						Remove this place
+					</button>
 				{/if}
 			</section>
 		{/if}

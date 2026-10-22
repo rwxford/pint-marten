@@ -4,10 +4,30 @@ import { expect, test, type Page } from '@playwright/test';
 const overpass = readFileSync('tests/fixtures/overpass-raleigh.json', 'utf8');
 
 // Minimal map style so tests never depend on the real tile server.
+// One labeled place stands in for the base map's points of interest: a restaurant the venue
+// search doesn't return.
+const fridays = { lat: 35.7786, lng: -78.6375 };
 const style = JSON.stringify({
 	version: 8,
-	sources: {},
-	layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#e8e4da' } }]
+	sources: {
+		pois: {
+			type: 'geojson',
+			data: {
+				type: 'FeatureCollection',
+				features: [
+					{
+						type: 'Feature',
+						geometry: { type: 'Point', coordinates: [fridays.lng, fridays.lat] },
+						properties: { name: "TGI Friday's", class: 'restaurant' }
+					}
+				]
+			}
+		}
+	},
+	layers: [
+		{ id: 'bg', type: 'background', paint: { 'background-color': '#e8e4da' } },
+		{ id: 'poi', type: 'circle', source: 'pois', paint: { 'circle-radius': 6 } }
+	]
 });
 
 test.use({
@@ -37,6 +57,21 @@ function trackProblems(page: Page) {
 	page.on('console', (m) => m.type() === 'error' && problems.push(m.text()));
 	page.on('pageerror', (e) => problems.push(e.message));
 	return problems;
+}
+
+/**
+ * Taps the map until `check` passes. Software WebGL in CI can take a few frames to draw the
+ * dots after a search, and a tap only finds what has been drawn.
+ */
+async function tapWhenDrawn(page: Page, x: number, y: number, check: () => Promise<void>) {
+	await expect(page.getByRole('region', { name: 'Map of nearby venues' })).toHaveAttribute(
+		'data-origin',
+		'you'
+	);
+	await expect(async () => {
+		await page.mouse.click(x, y);
+		await check();
+	}).toPass({ timeout: 10_000 });
 }
 
 async function importUntappd(page: Page) {
@@ -123,8 +158,11 @@ test('a tap near a venue dot selects it without a pixel-exact hit', async ({ pag
 	// The map is centered on the user; Test Taproom is ~15 m (about 2 px) away. Tap 14 px off.
 	const mapRegion = page.getByRole('region', { name: 'Map of nearby venues' });
 	const box = (await mapRegion.boundingBox())!;
-	await page.mouse.click(box.x + box.width / 2 + 14, box.y + box.height / 2);
-	await expect(page.getByRole('region', { name: 'Selected venue' })).toContainText('Test Taproom');
+	await tapWhenDrawn(page, box.x + box.width / 2 + 14, box.y + box.height / 2, async () =>
+		expect(page.getByRole('region', { name: 'Selected venue' })).toContainText('Test Taproom', {
+			timeout: 1000
+		})
+	);
 });
 
 test('falls back to GPS when the quick location lookup fails', async ({ page }) => {
@@ -166,4 +204,42 @@ test('does not retry when location permission is denied', async ({ page }) => {
 	expect(
 		await page.evaluate(() => (window as unknown as { geoCalls: () => number }).geoCalls())
 	).toBe(1);
+});
+
+test('adds a place from the map and marks it visited by hand', async ({ page }) => {
+	await mockServices(page);
+	await page.goto('/map');
+	await page.getByRole('button', { name: 'Near me' }).click();
+	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
+
+	// Near me centers the map on the user at zoom 14 (512 px tiles): ~3.9 m per pixel.
+	const user = { lat: 35.7796, lng: -78.6382 };
+	const metersPerPx = (40075016 * Math.cos((user.lat * Math.PI) / 180)) / (512 * 2 ** 14);
+	const dx =
+		((fridays.lng - user.lng) * 111320 * Math.cos((user.lat * Math.PI) / 180)) / metersPerPx;
+	const dy = ((user.lat - fridays.lat) * 110540) / metersPerPx;
+	const box = (await page.getByRole('region', { name: 'Map of nearby venues' }).boundingBox())!;
+	const offer = page.getByRole('region', { name: 'Add a place' });
+	await tapWhenDrawn(page, box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, async () =>
+		expect(offer).toContainText("TGI Friday's", { timeout: 1000 })
+	);
+	await expect(offer).toContainText('Restaurant');
+	await offer.getByRole('button', { name: 'Add as a beer spot' }).click();
+
+	const card = page.getByRole('region', { name: 'Selected venue' });
+	await expect(card).toContainText('New to you');
+	const list = page.getByRole('list', { name: 'Venues' });
+	await expect(list.getByRole('button', { name: /TGI Friday's/ })).toContainText('New');
+
+	await card.getByRole('checkbox', { name: 'I’ve been here' }).check();
+	await expect(card).toContainText('You’ve been here');
+	await expect(list.getByRole('button', { name: /TGI Friday's/ })).toContainText('Visited');
+
+	// Saved on the device: still there, still visited, after a reload.
+	await page.reload();
+	await expect(list.getByRole('button', { name: /TGI Friday's/ })).toContainText('Visited');
+
+	await list.getByRole('button', { name: /TGI Friday's/ }).click();
+	await page.getByRole('button', { name: 'Remove this place' }).click();
+	await expect(list).not.toContainText("TGI Friday's");
 });
