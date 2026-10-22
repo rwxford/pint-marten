@@ -55,23 +55,27 @@ export async function addCustomVenue(
 	const name = cleanString(place.name, 120);
 	if (!name) throw new Error('A place needs a name');
 	const key = normalizeText(name);
-	const existing = (await db.customVenues.toArray()).find(
-		(c) =>
-			normalizeText(c.name) === key &&
-			distanceMeters(c.lat, c.lng, place.lat, place.lng) <= SAME_PLACE_METERS
-	);
-	if (existing) return existing;
-	const venue: CustomVenue = {
-		id: `custom/${crypto.randomUUID()}`,
-		name,
-		kind: place.kind,
-		lat: place.lat,
-		lng: place.lng,
-		visited: false,
-		addedAt: now
-	};
-	await db.customVenues.add(venue);
-	return venue;
+	// One read-write transaction, so overlapping adds (two taps, two tabs) queue up and the
+	// second one sees the first one's place instead of inserting a duplicate.
+	return db.transaction('rw', db.customVenues, async () => {
+		const existing = (await db.customVenues.toArray()).find(
+			(c) =>
+				normalizeText(c.name) === key &&
+				distanceMeters(c.lat, c.lng, place.lat, place.lng) <= SAME_PLACE_METERS
+		);
+		if (existing) return existing;
+		const venue: CustomVenue = {
+			id: `custom/${crypto.randomUUID()}`,
+			name,
+			kind: place.kind,
+			lat: place.lat,
+			lng: place.lng,
+			visited: false,
+			addedAt: now
+		};
+		await db.customVenues.add(venue);
+		return venue;
+	});
 }
 
 export async function customVenuesIn(db: PintMartenDB, b: Bbox): Promise<CustomVenue[]> {

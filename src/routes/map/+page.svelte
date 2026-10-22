@@ -396,15 +396,24 @@
 						}
 						// Otherwise offer a labeled place from the base map (a restaurant, say) for adding.
 						// OpenFreeMap's places of interest are in the "poi" layer of its vector tiles.
-						const poiHit = nearestToTap(
-							e.point,
-							near.flatMap((f) => {
-								if (f.source === 'venues' || f.source === 'origin') return [];
-								if (f.sourceLayer !== undefined && f.sourceLayer !== 'poi') return [];
-								const s = typeof f.properties?.name === 'string' && onScreen(f);
-								return s ? [s] : [];
-							})
-						);
+						const isPoi = (f: (typeof near)[number]) =>
+							f.source !== 'venues' &&
+							f.source !== 'origin' &&
+							(f.sourceLayer === undefined || f.sourceLayer === 'poi') &&
+							typeof f.properties?.name === 'string' &&
+							f.geometry.type === 'Point';
+						// A tap on the label or icon itself counts, however far the text runs from the
+						// place's point; only near misses fall back to the closest point.
+						const direct = map!.queryRenderedFeatures(e.point).find(isPoi);
+						const poiHit = direct
+							? { f: direct }
+							: nearestToTap(
+									e.point,
+									near.flatMap((f) => {
+										const s = isPoi(f) && onScreen(f);
+										return s ? [s] : [];
+									})
+								);
 						if (!poiHit) {
 							candidate = null;
 							return;

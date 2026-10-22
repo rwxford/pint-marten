@@ -26,7 +26,8 @@ const style = JSON.stringify({
 	},
 	layers: [
 		{ id: 'bg', type: 'background', paint: { 'background-color': '#e8e4da' } },
-		{ id: 'poi', type: 'circle', source: 'pois', paint: { 'circle-radius': 6 } }
+		// Wider than the tap radius, like a long text label: taps far from the point still land on it.
+		{ id: 'poi', type: 'circle', source: 'pois', paint: { 'circle-radius': 30 } }
 	]
 });
 
@@ -74,6 +75,24 @@ async function tapWhenDrawn(page: Page, x: number, y: number, check: () => Promi
 	}).toPass({ timeout: 10_000 });
 }
 
+/** Where the test restaurant is drawn after "Near me" (zoom 14, 512 px tiles: ~3.9 m/px). */
+async function fridaysOnScreen(page: Page) {
+	const user = { lat: 35.7796, lng: -78.6382 };
+	const cos = Math.cos((user.lat * Math.PI) / 180);
+	const metersPerPx = (40075016 * cos) / (512 * 2 ** 14);
+	const box = (await page.getByRole('region', { name: 'Map of nearby venues' }).boundingBox())!;
+	return {
+		x: box.x + box.width / 2 + ((fridays.lng - user.lng) * 111320 * cos) / metersPerPx,
+		y: box.y + box.height / 2 + ((user.lat - fridays.lat) * 110540) / metersPerPx
+	};
+}
+
+/** Opens the map once the page is interactive: the map canvas only exists after mount. */
+async function gotoMap(page: Page) {
+	await page.goto('/map');
+	await expect(page.locator('.map canvas')).toBeAttached();
+}
+
 async function importUntappd(page: Page) {
 	await page.goto('/import');
 	const input = page.locator('input[type="file"]');
@@ -88,7 +107,7 @@ test('finds venues near me and marks the ones I have visited', async ({ page }) 
 	const calls = await mockServices(page);
 	await importUntappd(page);
 
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
 
@@ -129,7 +148,7 @@ test('finds venues near me and marks the ones I have visited', async ({ page }) 
 
 test('uses the saved area on the next visit without searching again', async ({ page }) => {
 	const calls = await mockServices(page);
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
 
@@ -142,7 +161,7 @@ test('uses the saved area on the next visit without searching again', async ({ p
 
 test('explains when the venue search service is busy', async ({ page }) => {
 	await mockServices(page, 429);
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('alert')).toHaveText(
 		'The venue search service is busy. Try again in a minute.'
@@ -151,7 +170,7 @@ test('explains when the venue search service is busy', async ({ page }) => {
 
 test('a tap near a venue dot selects it without a pixel-exact hit', async ({ page }) => {
 	await mockServices(page);
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
 
@@ -179,7 +198,7 @@ test('falls back to GPS when the quick location lookup fails', async ({ page }) 
 		};
 	});
 
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
 	expect(
@@ -198,7 +217,7 @@ test('does not retry when location permission is denied', async ({ page }) => {
 		};
 	});
 
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('alert')).toContainText('Location permission is off');
 	expect(
@@ -208,19 +227,13 @@ test('does not retry when location permission is denied', async ({ page }) => {
 
 test('adds a place from the map and marks it visited by hand', async ({ page }) => {
 	await mockServices(page);
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
 
-	// Near me centers the map on the user at zoom 14 (512 px tiles): ~3.9 m per pixel.
-	const user = { lat: 35.7796, lng: -78.6382 };
-	const metersPerPx = (40075016 * Math.cos((user.lat * Math.PI) / 180)) / (512 * 2 ** 14);
-	const dx =
-		((fridays.lng - user.lng) * 111320 * Math.cos((user.lat * Math.PI) / 180)) / metersPerPx;
-	const dy = ((user.lat - fridays.lat) * 110540) / metersPerPx;
-	const box = (await page.getByRole('region', { name: 'Map of nearby venues' }).boundingBox())!;
+	const { x, y } = await fridaysOnScreen(page);
 	const offer = page.getByRole('region', { name: 'Add a place' });
-	await tapWhenDrawn(page, box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, async () =>
+	await tapWhenDrawn(page, x, y, async () =>
 		expect(offer).toContainText("TGI Friday's", { timeout: 1000 })
 	);
 	await expect(offer).toContainText('Restaurant');
@@ -242,4 +255,19 @@ test('adds a place from the map and marks it visited by hand', async ({ page }) 
 	await list.getByRole('button', { name: /TGI Friday's/ }).click();
 	await page.getByRole('button', { name: 'Remove this place' }).click();
 	await expect(list).not.toContainText("TGI Friday's");
+});
+
+test('a tap on the far end of a place label still offers to add it', async ({ page }) => {
+	await mockServices(page);
+	await gotoMap(page);
+	await page.getByRole('button', { name: 'Near me' }).click();
+	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
+
+	// 26 px right of the place's point: on its drawn label, but beyond the 22 px tap radius.
+	const { x, y } = await fridaysOnScreen(page);
+	await tapWhenDrawn(page, x + 26, y, async () =>
+		expect(page.getByRole('region', { name: 'Add a place' })).toContainText("TGI Friday's", {
+			timeout: 1000
+		})
+	);
 });

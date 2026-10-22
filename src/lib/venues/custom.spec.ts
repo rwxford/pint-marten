@@ -66,3 +66,11 @@ describe('custom venues', () => {
 		expect(v).toMatchObject({ name: "TGI Friday's", kind: 'restaurant', lat: 33.6405 });
 	});
 });
+
+describe('concurrent adds', () => {
+	it('store one place when the same place is added twice at once', async () => {
+		const [a, b] = await Promise.all([addCustomVenue(db, fridays), addCustomVenue(db, fridays)]);
+		expect(a.id).toBe(b.id);
+		expect(await db.customVenues.count()).toBe(1);
+	});
+});
