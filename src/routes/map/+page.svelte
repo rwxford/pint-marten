@@ -4,7 +4,14 @@
 	import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
 	import { onDestroy, onMount } from 'svelte';
 	import { getDb } from '#lib/data/db.ts';
-	import { DEFAULT_VIEW, MAP_STYLE_URL, MIN_SEARCH_ZOOM, OVERPASS_URL } from '#lib/map/config.ts';
+	import {
+		DEFAULT_VIEW,
+		GPS_FIX,
+		MAP_STYLE_URL,
+		QUICK_FIX,
+		MIN_SEARCH_ZOOM,
+		OVERPASS_URL
+	} from '#lib/map/config.ts';
 	import { formatDistance, locationErrorMessage } from '#lib/map/format.ts';
 	import { AreaTooLargeError, cachedVenues, loadVenues } from '#lib/venues/cache.ts';
 	import { distanceMeters, visitedOsmIds, type KnownVenue } from '#lib/venues/match.ts';
@@ -140,31 +147,45 @@
 		}
 	}
 
-	function nearMe() {
+	function currentPosition(options: PositionOptions): Promise<GeolocationPosition> {
+		return new Promise((resolve, reject) =>
+			navigator.geolocation.getCurrentPosition(resolve, reject, options)
+		);
+	}
+
+	async function nearMe() {
 		if (!('geolocation' in navigator)) {
 			error = 'Location is not available on this device.';
 			return;
 		}
 		error = null;
 		status = 'Finding your location…';
-		navigator.geolocation.getCurrentPosition(
-			async (pos) => {
-				const center: [number, number] = [pos.coords.longitude, pos.coords.latitude];
-				origin = { lng: center[0], lat: center[1], you: true };
-				if (map) {
-					map.jumpTo({ center, zoom: 14 });
-					syncViewFromMap();
-				} else {
-					setViewWithoutMap(center, 14);
-				}
-				await search();
-			},
-			(err) => {
-				status = null;
-				error = locationErrorMessage(err);
-			},
-			{ enableHighAccuracy: false, timeout: 15_000, maximumAge: 60_000 }
-		);
+		let pos: GeolocationPosition;
+		try {
+			try {
+				// Wi-Fi and cell towers answer fast and save battery.
+				pos = await currentPosition(QUICK_FIX);
+			} catch (err) {
+				// Without Wi-Fi or cell signal (a plane, a basement, the countryside) only GPS can
+				// answer, and a cold GPS fix can take a while.
+				if ((err as GeolocationPositionError).code === 1) throw err;
+				status = 'Still looking — trying GPS…';
+				pos = await currentPosition(GPS_FIX);
+			}
+		} catch (err) {
+			status = null;
+			error = locationErrorMessage(err as GeolocationPositionError);
+			return;
+		}
+		const center: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+		origin = { lng: center[0], lat: center[1], you: true };
+		if (map) {
+			map.jumpTo({ center, zoom: 14 });
+			syncViewFromMap();
+		} else {
+			setViewWithoutMap(center, 14);
+		}
+		await search();
 	}
 
 	function select(v: OsmVenue) {

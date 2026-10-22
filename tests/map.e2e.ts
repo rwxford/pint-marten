@@ -108,3 +108,44 @@ test('explains when the venue search service is busy', async ({ page }) => {
 		'The venue search service is busy. Try again in a minute.'
 	);
 });
+
+test('falls back to GPS when the quick location lookup fails', async ({ page }) => {
+	await mockServices(page);
+	// Simulate no Wi-Fi or cell positioning: only a high-accuracy (GPS) request succeeds.
+	await page.addInitScript(() => {
+		const real = navigator.geolocation.getCurrentPosition.bind(navigator.geolocation);
+		const requests: (boolean | undefined)[] = [];
+		(window as unknown as { geoRequests: typeof requests }).geoRequests = requests;
+		navigator.geolocation.getCurrentPosition = (ok, fail, options) => {
+			requests.push(options?.enableHighAccuracy);
+			if (options?.enableHighAccuracy) return real(ok, fail, options);
+			fail?.({ code: 2, message: 'unavailable' } as GeolocationPositionError);
+		};
+	});
+
+	await page.goto('/map');
+	await page.getByRole('button', { name: 'Near me' }).click();
+	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
+	expect(
+		await page.evaluate(() => (window as unknown as { geoRequests: unknown }).geoRequests)
+	).toEqual([false, true]);
+});
+
+test('does not retry when location permission is denied', async ({ page }) => {
+	await mockServices(page);
+	await page.addInitScript(() => {
+		let calls = 0;
+		(window as unknown as { geoCalls: () => number }).geoCalls = () => calls;
+		navigator.geolocation.getCurrentPosition = (_ok, fail) => {
+			calls++;
+			fail?.({ code: 1, message: 'denied' } as GeolocationPositionError);
+		};
+	});
+
+	await page.goto('/map');
+	await page.getByRole('button', { name: 'Near me' }).click();
+	await expect(page.getByRole('alert')).toContainText('Location permission is off');
+	expect(
+		await page.evaluate(() => (window as unknown as { geoCalls: () => number }).geoCalls())
+	).toBe(1);
+});
