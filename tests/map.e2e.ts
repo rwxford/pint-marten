@@ -65,6 +65,11 @@ test('finds venues near me and marks the ones I have visited', async ({ page }) 
 	await expect(list.getByRole('button', { name: /Golden Comb Meadery/ })).toContainText('Meadery');
 	await expect(list.getByRole('button', { name: /Golden Comb Meadery/ })).toContainText('New');
 
+	// A "you are here" dot marks where distances are measured from, with a way back to it.
+	const mapRegion = page.getByRole('region', { name: 'Map of nearby venues' });
+	await expect(mapRegion).toHaveAttribute('data-origin', 'you');
+	await expect(page.getByRole('button', { name: 'Back to me' })).toBeVisible();
+
 	// Only the map area goes to the venue search; nothing from the history.
 	expect(calls.overpass).toBe(1);
 	expect(decodeURIComponent(calls.bodies[0])).not.toContain('Marten');
@@ -107,6 +112,19 @@ test('explains when the venue search service is busy', async ({ page }) => {
 	await expect(page.getByRole('alert')).toHaveText(
 		'The venue search service is busy. Try again in a minute.'
 	);
+});
+
+test('a tap near a venue dot selects it without a pixel-exact hit', async ({ page }) => {
+	await mockServices(page);
+	await page.goto('/map');
+	await page.getByRole('button', { name: 'Near me' }).click();
+	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
+
+	// The map is centered on the user; Test Taproom is ~15 m (about 2 px) away. Tap 14 px off.
+	const mapRegion = page.getByRole('region', { name: 'Map of nearby venues' });
+	const box = (await mapRegion.boundingBox())!;
+	await page.mouse.click(box.x + box.width / 2 + 14, box.y + box.height / 2);
+	await expect(page.getByRole('region', { name: 'Selected venue' })).toContainText('Test Taproom');
 });
 
 test('falls back to GPS when the quick location lookup fails', async ({ page }) => {

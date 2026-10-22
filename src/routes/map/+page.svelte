@@ -13,6 +13,7 @@
 		OVERPASS_URL
 	} from '#lib/map/config.ts';
 	import { formatDistance, locationErrorMessage } from '#lib/map/format.ts';
+	import { nearestToTap, TAP_RADIUS_PX } from '#lib/map/hit.ts';
 	import { AreaTooLargeError, cachedVenues, loadVenues } from '#lib/venues/cache.ts';
 	import { distanceMeters, visitedOsmIds, type KnownVenue } from '#lib/venues/match.ts';
 	import { fetchOverpass, OverpassError } from '#lib/venues/osm.ts';
@@ -34,6 +35,8 @@
 	// The selection actually applied to the map layer, read back from MapLibre (also lets tests
 	// confirm the highlight without inspecting the canvas).
 	let highlighted = $state<string | null>(null);
+	/** What the origin marker shows, for tests and assistive tech: 'you', 'search' or none. */
+	let originShown = $state<string | null>(null);
 	let mapError = $state<string | null>(null);
 	let view = $state<View | null>(null);
 	let venues = $state<OsmVenue[]>([]);
@@ -188,6 +191,25 @@
 		await search();
 	}
 
+	function originFeatures() {
+		return {
+			type: 'FeatureCollection' as const,
+			features: origin
+				? [
+						{
+							type: 'Feature' as const,
+							geometry: { type: 'Point' as const, coordinates: [origin.lng, origin.lat] },
+							properties: { you: origin.you }
+						}
+					]
+				: []
+		};
+	}
+
+	function recenter() {
+		if (origin) map?.easeTo({ center: [origin.lng, origin.lat] });
+	}
+
 	function select(v: OsmVenue) {
 		selectedId = v.osmId;
 		map?.easeTo({ center: [v.lng, v.lat] });
@@ -199,6 +221,14 @@
 		const data = toFeatures();
 		if (!mapReady || !map) return;
 		(map.getSource('venues') as GeoJSONSource | undefined)?.setData(data);
+	});
+
+	$effect(() => {
+		const data = originFeatures();
+		if (!mapReady || !map) return;
+		const source = map.getSource('origin') as GeoJSONSource | undefined;
+		source?.setData(data);
+		originShown = source && origin ? (origin.you ? 'you' : 'search') : null;
 	});
 
 	$effect(() => {
@@ -237,13 +267,34 @@
 				});
 				map.addControl(new maplibre.NavigationControl({ showCompass: false }), 'top-right');
 				map.on('load', () => {
+					// Where distances are measured from: a blue "you are here" dot after Near me, or a
+					// ring at the center of a searched area. Drawn under the venues so it never blocks a tap.
+					map!.addSource('origin', { type: 'geojson', data: originFeatures() });
+					map!.addLayer({
+						id: 'origin-halo',
+						type: 'circle',
+						source: 'origin',
+						filter: ['get', 'you'],
+						paint: { 'circle-radius': 16, 'circle-color': 'rgba(37, 117, 230, 0.18)' }
+					});
+					map!.addLayer({
+						id: 'origin-point',
+						type: 'circle',
+						source: 'origin',
+						paint: {
+							'circle-radius': ['case', ['get', 'you'], 7, 9],
+							'circle-color': ['case', ['get', 'you'], '#2575e6', 'rgba(0,0,0,0)'],
+							'circle-stroke-width': ['case', ['get', 'you'], 2.5, 2],
+							'circle-stroke-color': ['case', ['get', 'you'], '#ffffff', '#2575e6']
+						}
+					});
 					map!.addSource('venues', { type: 'geojson', data: toFeatures() });
 					map!.addLayer({
 						id: 'venue-points',
 						type: 'circle',
 						source: 'venues',
 						paint: {
-							'circle-radius': 7,
+							'circle-radius': 8,
 							'circle-color': ['case', ['get', 'visited'], '#8d948a', '#e9a23b'],
 							'circle-stroke-width': 2,
 							'circle-stroke-color': '#1f3a2e'
@@ -261,9 +312,27 @@
 							'circle-stroke-color': '#1f3a2e'
 						}
 					});
-					map!.on('click', 'venue-points', (e) => {
-						const id = e.features?.[0]?.properties?.id;
-						if (typeof id === 'string') selectedId = id;
+					// Dots are small targets for a finger: take the nearest one within a finger's
+					// width of the tap instead of requiring a pixel-exact hit.
+					map!.on('click', (e) => {
+						const r = TAP_RADIUS_PX;
+						const near = map!.queryRenderedFeatures(
+							[
+								[e.point.x - r, e.point.y - r],
+								[e.point.x + r, e.point.y + r]
+							],
+							{ layers: ['venue-points'] }
+						);
+						const hit = nearestToTap(
+							e.point,
+							near.flatMap((f) => {
+								const id = f.properties?.id;
+								if (typeof id !== 'string' || f.geometry.type !== 'Point') return [];
+								const p = map!.project(f.geometry.coordinates as [number, number]);
+								return [{ id, x: p.x, y: p.y }];
+							})
+						);
+						if (hit) selectedId = hit.id;
 					});
 					mapReady = true;
 				});
@@ -301,6 +370,7 @@
 		aria-label="Map of nearby venues"
 		role="region"
 		data-highlighted={highlighted ?? undefined}
+		data-origin={originShown ?? undefined}
 	>
 		{#if mapError}<p class="map-error">{mapError}</p>{/if}
 	</div>
@@ -313,6 +383,11 @@
 			<button class="button" type="button" onclick={search} disabled={!canSearch}>
 				Search this area
 			</button>
+			{#if origin && mapReady}
+				<button class="button" type="button" onclick={recenter}>
+					{origin.you ? 'Back to me' : 'Back to search'}
+				</button>
+			{/if}
 			<label class="toggle">
 				<input type="checkbox" bind:checked={onlyNew} />
 				New to me only
