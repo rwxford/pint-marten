@@ -5,7 +5,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { getDb } from '#lib/data/db.ts';
 	import { DEFAULT_VIEW, MAP_STYLE_URL, MIN_SEARCH_ZOOM, OVERPASS_URL } from '#lib/map/config.ts';
-	import { formatDistance } from '#lib/map/format.ts';
+	import { formatDistance, locationErrorMessage } from '#lib/map/format.ts';
 	import { AreaTooLargeError, cachedVenues, loadVenues } from '#lib/venues/cache.ts';
 	import { distanceMeters, visitedOsmIds, type KnownVenue } from '#lib/venues/match.ts';
 	import { fetchOverpass, OverpassError } from '#lib/venues/osm.ts';
@@ -159,9 +159,9 @@
 				}
 				await search();
 			},
-			() => {
+			(err) => {
 				status = null;
-				error = 'Couldn’t get your location. Check location permission, or pan the map instead.';
+				error = locationErrorMessage(err);
 			},
 			{ enableHighAccuracy: false, timeout: 15_000, maximumAge: 60_000 }
 		);
