@@ -8,6 +8,7 @@
 
 	const links = [
 		{ path: '/', label: 'Home' },
+		{ path: '/map', label: 'Map' },
 		{ path: '/import', label: 'Import' },
 		{ path: '/review', label: 'Review' }
 	] as const;

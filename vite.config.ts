@@ -28,9 +28,10 @@ export default defineConfig({
 						'unsafe-hashes',
 						'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='
 					],
-					'img-src': ['self', 'data:', 'blob:'],
+					'img-src': ['self', 'data:', 'blob:', 'https://tiles.openfreemap.org'],
 					'font-src': ['self'],
-					'connect-src': ['self'],
+					// Map tiles/styles/fonts and OpenStreetMap venue search (src/lib/map/config.ts).
+					'connect-src': ['self', 'https://tiles.openfreemap.org', 'https://overpass-api.de'],
 					'manifest-src': ['self'],
 					'worker-src': ['self'],
 					'base-uri': ['none'],

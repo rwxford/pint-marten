@@ -54,6 +54,7 @@
 	},
 	"dependencies": {
 		"dexie": "4.4.6",
+		"maplibre-gl": "6.15.0",
 		"papaparse": "5.7.0"
 	}
 }
