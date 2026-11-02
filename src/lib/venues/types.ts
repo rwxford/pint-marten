@@ -1,5 +1,15 @@
 export type VenueKind =
-	'brewery' | 'cidery' | 'meadery' | 'pub' | 'bar' | 'biergarten' | 'bottle_shop';
+	| 'brewery'
+	| 'cidery'
+	| 'meadery'
+	| 'pub'
+	| 'bar'
+	| 'biergarten'
+	| 'bottle_shop'
+	// Only for places you add yourself; the OpenStreetMap search never returns these.
+	| 'restaurant'
+	| 'cafe'
+	| 'other';
 
 export const VENUE_KIND_LABELS: Record<VenueKind, string> = {
 	brewery: 'Brewery',
@@ -8,7 +18,10 @@ export const VENUE_KIND_LABELS: Record<VenueKind, string> = {
 	pub: 'Pub',
 	bar: 'Bar',
 	biergarten: 'Beer garden',
-	bottle_shop: 'Bottle shop'
+	bottle_shop: 'Bottle shop',
+	restaurant: 'Restaurant',
+	cafe: 'Café',
+	other: 'Place'
 };
 
 /** A drinking venue from OpenStreetMap. */

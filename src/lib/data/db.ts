@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type { Category, ImportSource } from '../import/types';
-import type { OsmVenue } from '../venues/types';
+import type { OsmVenue, VenueKind } from '../venues/types';
 
 export interface Producer {
 	id: number;
@@ -92,6 +92,19 @@ export interface OsmCell {
 	fetchedAt: number;
 }
 
+/** A place you added yourself, e.g. a restaurant OpenStreetMap doesn't list as a drinking venue. */
+export interface CustomVenue {
+	/** "custom/<uuid>"; shares the id space with OSM venues ("node/123") in the map and list. */
+	id: string;
+	name: string;
+	kind: VenueKind;
+	lat: number;
+	lng: number;
+	/** Set by hand: added places aren't matched against imported check-ins. */
+	visited: boolean;
+	addedAt: number;
+}
+
 export type PintMartenDB = Dexie & {
 	producers: EntityTable<Producer, 'id'>;
 	drinks: EntityTable<Drink, 'id'>;
@@ -102,6 +115,7 @@ export type PintMartenDB = Dexie & {
 	aliases: EntityTable<Alias, 'key'>;
 	osmVenues: EntityTable<OsmVenue, 'osmId'>;
 	osmCells: EntityTable<OsmCell, 'cell'>;
+	customVenues: EntityTable<CustomVenue, 'id'>;
 };
 
 export function openDatabase(name = 'pint-marten'): PintMartenDB {
@@ -116,6 +130,7 @@ export function openDatabase(name = 'pint-marten'): PintMartenDB {
 	});
 	db.version(2).stores({ aliases: '&key, [kind+targetId]' });
 	db.version(3).stores({ osmVenues: '&osmId, cell', osmCells: '&cell' });
+	db.version(4).stores({ customVenues: '&id, lat' });
 	return db;
 }
 

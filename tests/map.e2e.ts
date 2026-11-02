@@ -4,10 +4,31 @@ import { expect, test, type Page } from '@playwright/test';
 const overpass = readFileSync('tests/fixtures/overpass-raleigh.json', 'utf8');
 
 // Minimal map style so tests never depend on the real tile server.
+// One labeled place stands in for the base map's points of interest: a restaurant the venue
+// search doesn't return.
+const fridays = { lat: 35.7786, lng: -78.6375 };
 const style = JSON.stringify({
 	version: 8,
-	sources: {},
-	layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#e8e4da' } }]
+	sources: {
+		pois: {
+			type: 'geojson',
+			data: {
+				type: 'FeatureCollection',
+				features: [
+					{
+						type: 'Feature',
+						geometry: { type: 'Point', coordinates: [fridays.lng, fridays.lat] },
+						properties: { name: "TGI Friday's", class: 'restaurant' }
+					}
+				]
+			}
+		}
+	},
+	layers: [
+		{ id: 'bg', type: 'background', paint: { 'background-color': '#e8e4da' } },
+		// Wider than the tap radius, like a long text label: taps far from the point still land on it.
+		{ id: 'poi', type: 'circle', source: 'pois', paint: { 'circle-radius': 30 } }
+	]
 });
 
 test.use({
@@ -39,6 +60,39 @@ function trackProblems(page: Page) {
 	return problems;
 }
 
+/**
+ * Taps the map until `check` passes. Software WebGL in CI can take a few frames to draw the
+ * dots after a search, and a tap only finds what has been drawn.
+ */
+async function tapWhenDrawn(page: Page, x: number, y: number, check: () => Promise<void>) {
+	await expect(page.getByRole('region', { name: 'Map of nearby venues' })).toHaveAttribute(
+		'data-origin',
+		'you'
+	);
+	await expect(async () => {
+		await page.mouse.click(x, y);
+		await check();
+	}).toPass({ timeout: 10_000 });
+}
+
+/** Where the test restaurant is drawn after "Near me" (zoom 14, 512 px tiles: ~3.9 m/px). */
+async function fridaysOnScreen(page: Page) {
+	const user = { lat: 35.7796, lng: -78.6382 };
+	const cos = Math.cos((user.lat * Math.PI) / 180);
+	const metersPerPx = (40075016 * cos) / (512 * 2 ** 14);
+	const box = (await page.getByRole('region', { name: 'Map of nearby venues' }).boundingBox())!;
+	return {
+		x: box.x + box.width / 2 + ((fridays.lng - user.lng) * 111320 * cos) / metersPerPx,
+		y: box.y + box.height / 2 + ((user.lat - fridays.lat) * 110540) / metersPerPx
+	};
+}
+
+/** Opens the map once the page is interactive: the map canvas only exists after mount. */
+async function gotoMap(page: Page) {
+	await page.goto('/map');
+	await expect(page.locator('.map canvas')).toBeAttached();
+}
+
 async function importUntappd(page: Page) {
 	await page.goto('/import');
 	const input = page.locator('input[type="file"]');
@@ -53,7 +107,7 @@ test('finds venues near me and marks the ones I have visited', async ({ page }) 
 	const calls = await mockServices(page);
 	await importUntappd(page);
 
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
 
@@ -94,7 +148,7 @@ test('finds venues near me and marks the ones I have visited', async ({ page }) 
 
 test('uses the saved area on the next visit without searching again', async ({ page }) => {
 	const calls = await mockServices(page);
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
 
@@ -107,7 +161,7 @@ test('uses the saved area on the next visit without searching again', async ({ p
 
 test('explains when the venue search service is busy', async ({ page }) => {
 	await mockServices(page, 429);
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('alert')).toHaveText(
 		'The venue search service is busy. Try again in a minute.'
@@ -116,15 +170,18 @@ test('explains when the venue search service is busy', async ({ page }) => {
 
 test('a tap near a venue dot selects it without a pixel-exact hit', async ({ page }) => {
 	await mockServices(page);
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
 
 	// The map is centered on the user; Test Taproom is ~15 m (about 2 px) away. Tap 14 px off.
 	const mapRegion = page.getByRole('region', { name: 'Map of nearby venues' });
 	const box = (await mapRegion.boundingBox())!;
-	await page.mouse.click(box.x + box.width / 2 + 14, box.y + box.height / 2);
-	await expect(page.getByRole('region', { name: 'Selected venue' })).toContainText('Test Taproom');
+	await tapWhenDrawn(page, box.x + box.width / 2 + 14, box.y + box.height / 2, async () =>
+		expect(page.getByRole('region', { name: 'Selected venue' })).toContainText('Test Taproom', {
+			timeout: 1000
+		})
+	);
 });
 
 test('falls back to GPS when the quick location lookup fails', async ({ page }) => {
@@ -141,7 +198,7 @@ test('falls back to GPS when the quick location lookup fails', async ({ page }) 
 		};
 	});
 
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
 	expect(
@@ -160,10 +217,57 @@ test('does not retry when location permission is denied', async ({ page }) => {
 		};
 	});
 
-	await page.goto('/map');
+	await gotoMap(page);
 	await page.getByRole('button', { name: 'Near me' }).click();
 	await expect(page.getByRole('alert')).toContainText('Location permission is off');
 	expect(
 		await page.evaluate(() => (window as unknown as { geoCalls: () => number }).geoCalls())
 	).toBe(1);
+});
+
+test('adds a place from the map and marks it visited by hand', async ({ page }) => {
+	await mockServices(page);
+	await gotoMap(page);
+	await page.getByRole('button', { name: 'Near me' }).click();
+	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
+
+	const { x, y } = await fridaysOnScreen(page);
+	const offer = page.getByRole('region', { name: 'Add a place' });
+	await tapWhenDrawn(page, x, y, async () =>
+		expect(offer).toContainText("TGI Friday's", { timeout: 1000 })
+	);
+	await expect(offer).toContainText('Restaurant');
+	await offer.getByRole('button', { name: 'Add as a beer spot' }).click();
+
+	const card = page.getByRole('region', { name: 'Selected venue' });
+	await expect(card).toContainText('New to you');
+	const list = page.getByRole('list', { name: 'Venues' });
+	await expect(list.getByRole('button', { name: /TGI Friday's/ })).toContainText('New');
+
+	await card.getByRole('checkbox', { name: 'I’ve been here' }).check();
+	await expect(card).toContainText('You’ve been here');
+	await expect(list.getByRole('button', { name: /TGI Friday's/ })).toContainText('Visited');
+
+	// Saved on the device: still there, still visited, after a reload.
+	await page.reload();
+	await expect(list.getByRole('button', { name: /TGI Friday's/ })).toContainText('Visited');
+
+	await list.getByRole('button', { name: /TGI Friday's/ }).click();
+	await page.getByRole('button', { name: 'Remove this place' }).click();
+	await expect(list).not.toContainText("TGI Friday's");
+});
+
+test('a tap on the far end of a place label still offers to add it', async ({ page }) => {
+	await mockServices(page);
+	await gotoMap(page);
+	await page.getByRole('button', { name: 'Near me' }).click();
+	await expect(page.getByRole('status')).toHaveText('7 venues in this area');
+
+	// 26 px right of the place's point: on its drawn label, but beyond the 22 px tap radius.
+	const { x, y } = await fridaysOnScreen(page);
+	await tapWhenDrawn(page, x + 26, y, async () =>
+		expect(page.getByRole('region', { name: 'Add a place' })).toContainText("TGI Friday's", {
+			timeout: 1000
+		})
+	);
 });
