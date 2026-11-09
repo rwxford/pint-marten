@@ -38,6 +38,7 @@
 				</p>
 			{/if}
 			<p class="actions">
+				<a class="button button-primary" href={resolve('/log')}>Log a drink</a>
 				<a class="button" href={resolve('/import')}>Import more</a>
 				<button class="button button-danger" type="button" onclick={onDeleteAll}>
 					Delete all data
@@ -51,7 +52,10 @@
 				Import an export from a beer-tracking app or a spreadsheet so Pint Marten knows what you've
 				already had and where.
 			</p>
-			<p><a class="button button-primary" href={resolve('/import')}>Import history</a></p>
+			<p class="actions">
+				<a class="button button-primary" href={resolve('/import')}>Import history</a>
+				<a class="button" href={resolve('/log')}>Log a drink</a>
+			</p>
 		</section>
 	{/if}
 

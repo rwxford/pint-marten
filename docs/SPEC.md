@@ -120,6 +120,28 @@ saved as CSV in the meantime.
   a threshold → "visited". Imports without coordinates match on name + city, falling back
   to the review queue.
 
+**Logging a drink in the app** (issue #14, option A)
+
+Between exports, a drink you just had and the venue you're in would still show as new. Two
+shortcuts close that gap without touching Untappd:
+
+- **Log a drink** (from Home, or on a venue card on the map): pick a drink from history by
+  type-ahead or enter a new name and producer (style and ABV optional; category and NA flag
+  inferred as at import), plus serving, rating and time (defaults to now). On the map the venue
+  is the selected one; on the Log page it's optional and chosen from history venues.
+- **I had a drink here** on an unvisited map venue marks it visited without adding a drink.
+- Drinks and producers are matched by normalized name and aliases, as an import would.
+  A map venue joins a history venue within 150 m whose name matches; otherwise a history venue
+  is created, linked by `osm:<id>` (or `place:custom/<uuid>` for places you added).
+- Hand-logged consumptions use row key `manual:<uuid>` and belong to one standing import job
+  (source `manual`, "Logged in app"), so stats and "Delete all data" need no changes.
+- **Reconciling with later imports:** an imported check-in replaces a hand-logged one for the
+  same drink within ±2 hours at the same venue (same history venue, or within 150 m with a
+  matching name; a side with no venue doesn't block the match). The import summary says how
+  many were replaced. A hand-logged drink whose name differs slightly from the import's goes
+  to the review queue like any near-duplicate; merging it there does not yet remove the
+  duplicate consumption.
+
 ### 4.2 Local data model
 
 All data lives on-device in IndexedDB (the browser's built-in database).
@@ -491,7 +513,7 @@ current limits). For a single user this is plenty. Results are cached by
 |---|---|---|
 | M1 | Scaffold | SvelteKit + PWA installable, CSP in place, CI running lint/typecheck/tests. **Done.** |
 | M2 | Import | Untappd export + generic mapper import into Dexie; review queue; idempotent re-import. **Done.** XLSX deferred (see §4.1). |
-| M3 | Map & venues | MapLibre map, Overpass venue fetch + cache, visited/unvisited styling. **In review.** |
+| M3 | Map & venues | MapLibre map, Overpass venue fetch + cache, visited/unvisited styling. **Done.** |
 | M4 | Travel time | ORS isochrone + matrix, walk/drive toggle, minutes slider, ranked list |
 | M5 | Novelty & NA | Scoring per §4.4, NA tri-state per §4.5 |
 | M6 | Sightings | Paste/type menu parser, freshness |
@@ -509,6 +531,7 @@ current limits). For a single user this is plenty. Results are cached by
 | 6 | Contribution policy | CLA, enforced by a GitHub Action (§9). |
 | 7 | Product name | **Pint Marten** (§12). |
 | 8 | Places missing from the venue search | Tap a base-map label to add it; local only; visited is set by hand (§4.3). |
+| 9 | Keeping history current between exports | Log drinks in the app; later imports replace matching hand-logged rows; "I had a drink here" marks a venue visited with no drink (§4.1). Paste and screenshot import (issue #14 options B, C) later. |
 
 ### Still open
 

@@ -249,6 +249,13 @@
 					<dd>{n(r.newVenues)}</dd>
 				</div>
 			</dl>
+			{#if r.replacedManual > 0}
+				<p>
+					{r.replacedManual === 1
+						? '1 drink you logged in the app was in this export; the imported check-in replaced it.'
+						: `${n(r.replacedManual)} drinks you logged in the app were in this export; the imported check-ins replaced them.`}
+				</p>
+			{/if}
 			{#if r.reviewItems > 0}
 				<p>
 					<a href={resolve('/review')}
