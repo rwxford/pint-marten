@@ -29,32 +29,32 @@
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
 		"@playwright/test": "^1.60.0",
-		"@sveltejs/adapter-static": "^4.0.0",
-		"@sveltejs/kit": "^3.0.0",
+		"@sveltejs/adapter-static": "^4.0.1",
+		"@sveltejs/kit": "^3.1.1",
 		"@sveltejs/vite-plugin-svelte": "^7.2.0",
 		"@types/node": "^22",
 		"@types/papaparse": "5.5.2",
-		"eslint": "^10.4.1",
+		"eslint": "^10.14.0",
 		"eslint-config-prettier": "^10.1.8",
-		"eslint-plugin-svelte": "^3.19.0",
-		"fake-indexeddb": "6.2.6",
-		"globals": "^17.6.0",
+		"eslint-plugin-svelte": "^3.24.0",
+		"fake-indexeddb": "6.2.7",
+		"globals": "^17.14.0",
 		"prettier": "^3.8.3",
 		"prettier-plugin-svelte": "^4.1.0",
-		"svelte": "^5.57.1",
-		"svelte-check": "^4.6.0",
+		"svelte": "^5.57.3",
+		"svelte-check": "^4.7.8",
 		"typescript": "^6.0.3",
-		"typescript-eslint": "^8.60.1",
-		"vite": "^8.3.0",
-		"vitest": "^4.1.8"
+		"typescript-eslint": "^8.72.1",
+		"vite": "^8.3.5",
+		"vitest": "^5.0.5"
 	},
 	"imports": {
 		"#lib": "./src/lib/index.js",
 		"#lib/*": "./src/lib/*"
 	},
 	"dependencies": {
-		"dexie": "4.4.6",
-		"maplibre-gl": "6.15.0",
+		"dexie": "4.4.7",
+		"maplibre-gl": "6.16.0",
 		"papaparse": "5.7.0"
 	}
 }
