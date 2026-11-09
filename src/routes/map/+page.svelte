@@ -180,7 +180,22 @@
 			return;
 		}
 		knownLoaded = loadKnown();
-		osmVisited = visitedOsmIds(osmVenues, await knownLoaded);
+		osmVisited = visitedOsmIds(osmVenues, await latestKnown());
+	}
+
+	/**
+	 * History venues as of now. Marking a venue visited replaces `knownLoaded` while a search or
+	 * map move may already be awaiting the old list, so wait until it stops changing; otherwise the
+	 * slower one would finish last and put back the stale "visited" set.
+	 */
+	async function latestKnown(): Promise<KnownVenue[]> {
+		let pending: Promise<KnownVenue[]>;
+		let known: KnownVenue[];
+		do {
+			pending = knownLoaded;
+			known = await pending;
+		} while (pending !== knownLoaded);
+		return known;
 	}
 
 	async function hadDrinkHere(place: MapPlace) {
@@ -191,7 +206,7 @@
 
 	async function showCached() {
 		if (!view) return;
-		const known = await knownLoaded;
+		await knownLoaded;
 		const db = getDb();
 		const version = customsVersion;
 		const [osm, added] = await Promise.all([
@@ -200,7 +215,7 @@
 		]);
 		osmVenues = osm;
 		if (version === customsVersion) customs = added;
-		osmVisited = visitedOsmIds(osm, known);
+		osmVisited = visitedOsmIds(osm, await latestKnown());
 	}
 
 	async function search() {
@@ -210,10 +225,10 @@
 		error = null;
 		status = 'Searching OpenStreetMap…';
 		try {
-			const known = await knownLoaded;
+			await knownLoaded;
 			const result = await loadVenues(getDb(), view.bbox, (b) => fetchOverpass(b, OVERPASS_URL));
 			osmVenues = result.venues;
-			osmVisited = visitedOsmIds(osmVenues, known);
+			osmVisited = visitedOsmIds(osmVenues, await latestKnown());
 			const version = customsVersion;
 			const added = await customVenuesIn(getDb(), view.bbox);
 			if (version === customsVersion) customs = added;
