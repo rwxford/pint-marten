@@ -301,3 +301,24 @@ export function filterOptions<T extends { name: string; search: string }>(
 		.slice(0, limit)
 		.map((x) => x.o);
 }
+
+/** The history drink with this name and producer (ignoring case, punctuation and suffixes). */
+export function matchDrink(
+	options: readonly DrinkOption[],
+	name: string,
+	producer: string
+): DrinkOption | null {
+	const dk = drinkKey(name);
+	const pk = producerKey(producer);
+	return options.find((o) => drinkKey(o.name) === dk && producerKey(o.producer) === pk) ?? null;
+}
+
+/** The history venue whose name matches, by the same rule as map "visited" matching. */
+export function matchVenue(options: readonly VenueOption[], name: string): VenueOption | null {
+	const key = venueMatchKey(name);
+	return (
+		options.find((o) => venueMatchKey(o.name) === key) ??
+		options.find((o) => namesMatch(venueMatchKey(o.name), key)) ??
+		null
+	);
+}

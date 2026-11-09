@@ -130,6 +130,14 @@ shortcuts close that gap without touching Untappd:
   inferred as at import), plus serving, rating and time (defaults to now). On the map the venue
   is the selected one; on the Log page it's optional and chosen from history venues.
 - **I had a drink here** on an unvisited map venue marks it visited without adding a drink.
+- **Paste an Untappd check-in** (option B) at the top of the form: paste the text Untappd's share
+  sheet copies (or use "Paste from clipboard" where the browser allows it) and the form fills
+  in. The parser expects "Drinking a/an <drink> by <producer> at/@ <venue>", ignores hashtags
+  and keeps the link only as text, never fetching it. The drink and venue are matched against
+  history; on a map venue card, a different venue name in the text is pointed out and the
+  selected venue is kept. Anything else fails soft with a message, and the form stays usable.
+  The share text carries no time, rating or serving. **The exact wording still needs checking
+  against a real share from the Untappd app.**
 - Drinks and producers are matched by normalized name and aliases, as an import would.
   A map venue joins a history venue within 150 m whose name matches; otherwise a history venue
   is created, linked by `osm:<id>` (or `place:custom/<uuid>` for places you added).
@@ -531,7 +539,7 @@ current limits). For a single user this is plenty. Results are cached by
 | 6 | Contribution policy | CLA, enforced by a GitHub Action (§9). |
 | 7 | Product name | **Pint Marten** (§12). |
 | 8 | Places missing from the venue search | Tap a base-map label to add it; local only; visited is set by hand (§4.3). |
-| 9 | Keeping history current between exports | Log drinks in the app; later imports replace matching hand-logged rows; "I had a drink here" marks a venue visited with no drink (§4.1). Paste and screenshot import (issue #14 options B, C) later. |
+| 9 | Keeping history current between exports | Log drinks in the app, by hand or by pasting Untappd's share text; later imports replace matching hand-logged rows; "I had a drink here" marks a venue visited with no drink (§4.1). Screenshot OCR (issue #14 option C) later, if at all. |
 
 ### Still open
 

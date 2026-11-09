@@ -6,6 +6,8 @@
 		filterOptions,
 		fromDateTimeLocal,
 		logDrink,
+		matchDrink,
+		matchVenue,
 		SERVING_TYPES,
 		toDateTimeLocal,
 		venueOptions,
@@ -14,7 +16,9 @@
 		type MapPlace,
 		type VenueOption
 	} from '#lib/data/manual.ts';
+	import { parseShareText } from '#lib/import/share.ts';
 	import { parseAbv, parseRating } from '#lib/import/values.ts';
+	import { namesMatch, venueMatchKey } from '#lib/venues/match.ts';
 
 	interface Props {
 		/** The map venue the drink was had at; without one, a venue from history can be chosen. */
@@ -43,6 +47,11 @@
 	let error = $state<string | null>(null);
 	let saving = $state(false);
 
+	let pasteOpen = $state(false);
+	let shareText = $state('');
+	let pasteNote = $state<string | null>(null);
+	const canReadClipboard = typeof navigator !== 'undefined' && !!navigator.clipboard?.readText;
+
 	const drinkMatches = $derived(chosenDrink ? [] : filterOptions(drinks, drinkQuery));
 	const venueMatches = $derived(place || chosenVenue ? [] : filterOptions(venues, venueQuery, 5));
 
@@ -58,6 +67,45 @@
 
 	function clearDrink() {
 		chosenDrink = null;
+	}
+
+	/** Fills the form from a check-in's share text. Nothing is fetched, not even its link. */
+	function fillFromShare() {
+		const shared = parseShareText(shareText);
+		if (!shared) {
+			pasteNote =
+				'That doesn’t look like an Untappd check-in (“Drinking a … by … at …”). Fill in the form instead.';
+			return;
+		}
+		const known = matchDrink(drinks, shared.drink, shared.producer);
+		if (known) chooseDrink(known);
+		else {
+			chosenDrink = null;
+			drinkQuery = shared.drink;
+			producer = shared.producer;
+		}
+		const notes = ['Filled in from the check-in. Check the details, then log it.'];
+		if (shared.venue && place) {
+			if (!namesMatch(venueMatchKey(shared.venue), venueMatchKey(place.name)))
+				notes.push(`The check-in says ${shared.venue}; this will be logged at ${place.name}.`);
+		} else if (shared.venue) {
+			const venue = matchVenue(venues, shared.venue);
+			chosenVenue = venue;
+			venueQuery = venue?.name ?? shared.venue;
+		}
+		pasteNote = notes.join(' ');
+		shareText = '';
+		pasteOpen = false;
+	}
+
+	async function pasteFromClipboard() {
+		try {
+			shareText = await navigator.clipboard.readText();
+		} catch {
+			pasteNote = 'Couldn’t read the clipboard. Paste the text into the box instead.';
+			return;
+		}
+		fillFromShare();
 	}
 
 	async function submit(event: SubmitEvent) {
@@ -105,6 +153,26 @@
 </script>
 
 <form class="log" onsubmit={submit} aria-label="Log a drink" novalidate>
+	<details class="paste" bind:open={pasteOpen}>
+		<summary>Paste an Untappd check-in</summary>
+		<p class="muted small">
+			In Untappd, share your check-in and copy the text, then paste it here. It’s read on this
+			device; its link is never opened.
+		</p>
+		{#if canReadClipboard}
+			<button class="button" type="button" onclick={pasteFromClipboard}>Paste from clipboard</button
+			>
+		{/if}
+		<label class="field">
+			<span>Share text</span>
+			<textarea bind:value={shareText} rows="3" maxlength="2000"></textarea>
+		</label>
+		<button class="button" type="button" onclick={fillFromShare} disabled={!shareText.trim()}>
+			Fill in
+		</button>
+	</details>
+	{#if pasteNote}<p class="note" role="status">{pasteNote}</p>{/if}
+
 	<label class="field">
 		<span>Drink</span>
 		<input
@@ -222,8 +290,34 @@
 		gap: 0.75rem;
 	}
 
-	.error {
+	.error,
+	.note {
 		margin: 0;
+	}
+
+	.note {
+		font-size: 0.875rem;
+	}
+
+	.paste[open] {
+		padding-bottom: 0.25rem;
+	}
+
+	.paste > :not(summary) {
+		margin-top: 0.5rem;
+	}
+
+	.paste summary {
+		min-height: 2.75rem;
+		display: flex;
+		align-items: center;
+		font-weight: 600;
+		color: var(--color-accent);
+		cursor: pointer;
+	}
+
+	.paste .button {
+		display: flex;
 	}
 
 	.field {
@@ -249,7 +343,8 @@
 	}
 
 	input,
-	select {
+	select,
+	textarea {
 		width: 100%;
 		min-height: 2.75rem;
 		padding: 0.5rem 0.625rem;

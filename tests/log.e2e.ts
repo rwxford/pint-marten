@@ -147,3 +147,58 @@ test('an import replaces a drink logged by hand', async ({ page }) => {
 	await expect(checkIns(page)).toHaveText('11');
 	expect(problems).toEqual([]);
 });
+
+test('fills the form from pasted Untappd share text', async ({ page }) => {
+	const problems = trackProblems(page);
+	const requests: string[] = [];
+	page.on('request', (r) => requests.push(r.url()));
+	await importUntappd(page);
+	await page.goto('/log');
+	const form = page.getByRole('form', { name: 'Log a drink' });
+	await expect(form.getByLabel('When')).not.toHaveValue('');
+
+	await form.getByText('Paste an Untappd check-in').click();
+	await form.getByLabel('Share text').fill('Hello there');
+	await form.getByRole('button', { name: 'Fill in' }).click();
+	await expect(form.getByRole('status')).toContainText('doesn’t look like an Untappd check-in');
+
+	// The paste box stays open after a failed read, ready for another try.
+	await form
+		.getByLabel('Share text')
+		.fill(
+			'Drinking a Marten Haze by Fictional Fox Brewing Co. at Test Taproom — https://untp.beer/s/c42'
+		);
+	await form.getByRole('button', { name: 'Fill in' }).click();
+	await expect(form.getByRole('status')).toContainText('Filled in from the check-in');
+	await expect(form.getByLabel('Drink', { exact: true })).toHaveValue('Marten Haze');
+	await expect(form).toContainText('already in your history');
+	await expect(form.getByLabel('Where (optional)')).toHaveValue('Test Taproom');
+	await form.getByRole('button', { name: 'Log drink' }).click();
+	await expect(page.getByRole('status')).toHaveText('Logged Marten Haze at Test Taproom.');
+
+	// The check-in link is only text: it's never requested.
+	expect(requests.some((u) => u.includes('untp.beer'))).toBe(false);
+	expect(problems).toEqual([]);
+});
+
+test('pasting on a map venue notes a different venue name', async ({ page }) => {
+	await searchNearMe(page);
+	await page
+		.getByRole('list', { name: 'Venues' })
+		.getByRole('button', { name: /The Corner Pub/ })
+		.click();
+	const card = page.getByRole('region', { name: 'Selected venue' });
+	await card.getByRole('button', { name: 'Log a drink…' }).click();
+	const form = card.getByRole('form', { name: 'Log a drink' });
+	await form.getByText('Paste an Untappd check-in').click();
+	await form
+		.getByLabel('Share text')
+		.fill('Drinking an Orchard Dry by Orchard Hollow Cider @ Somewhere Else #untappd');
+	await form.getByRole('button', { name: 'Fill in' }).click();
+	await expect(form.getByRole('status')).toContainText(
+		'The check-in says Somewhere Else; this will be logged at The Corner Pub.'
+	);
+	await expect(form.getByLabel('Made by')).toHaveValue('Orchard Hollow Cider');
+	await form.getByRole('button', { name: 'Log drink' }).click();
+	await expect(card.getByRole('status')).toHaveText('Logged Orchard Dry at The Corner Pub.');
+});

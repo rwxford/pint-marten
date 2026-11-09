@@ -13,6 +13,9 @@ import {
 	fromDateTimeLocal,
 	logDrink,
 	MANUAL_JOB_NAME,
+	matchDrink,
+	matchVenue,
+	venueOptions,
 	markVisited,
 	toDateTimeLocal,
 	toLocalIso,
@@ -214,6 +217,20 @@ describe('type-ahead', () => {
 			'Hazelnut Porter',
 			'Big Haze'
 		]);
+	});
+});
+
+describe('matching pasted names', () => {
+	it('finds a history drink and venue despite case, punctuation and suffixes', async () => {
+		await applyImport(db, untappd(), 'export.csv');
+		const drinks = await drinkOptions(db);
+		expect(matchDrink(drinks, 'MARTEN HAZE', 'Fictional Fox Brewing Co.')).toMatchObject({
+			name: 'Marten Haze'
+		});
+		expect(matchDrink(drinks, 'Marten Haze', 'Other Brewery')).toBeNull();
+		const venues = await venueOptions(db);
+		expect(matchVenue(venues, 'The Test Taproom')).toMatchObject({ name: 'Test Taproom' });
+		expect(matchVenue(venues, 'Somewhere Else Entirely')).toBeNull();
 	});
 });
 
