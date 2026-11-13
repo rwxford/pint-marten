@@ -25,7 +25,7 @@ export function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: n
 }
 
 /** Containment only counts for keys of 4+ characters, so "j" doesn't match everything. */
-function namesMatch(a: string, b: string): boolean {
+export function namesMatch(a: string, b: string): boolean {
 	if (a === b) return true;
 	const [short, long] = a.length <= b.length ? [a, b] : [b, a];
 	if (short.length >= 4 && long.includes(short)) return true;

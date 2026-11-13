@@ -3,7 +3,9 @@
 	import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 	import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
 	import { onDestroy, onMount } from 'svelte';
+	import LogDrink from '#lib/components/LogDrink.svelte';
 	import { getDb } from '#lib/data/db.ts';
+	import { markVisited, type MapPlace } from '#lib/data/manual.ts';
 	import {
 		DEFAULT_VIEW,
 		GPS_FIX,
@@ -19,6 +21,7 @@
 		addCustomVenue,
 		asVenue,
 		customVenuesIn,
+		isCustom,
 		poiKind,
 		removeCustomVenue,
 		setCustomVisited,
@@ -66,6 +69,10 @@
 	let busy = $state(false);
 	let onlyNew = $state(false);
 	let selectedId = $state<string | null>(null);
+	// The "Log a drink" form is open on the selected venue.
+	let logging = $state(false);
+	// Confirmation after logging a drink or marking a venue visited.
+	let notice = $state<string | null>(null);
 	// Where distances are measured from: your location after "Near me", otherwise the center of
 	// the last search. Selecting a venue moves the map but not this point.
 	let origin = $state<{ lng: number; lat: number; you: boolean } | null>(null);
@@ -90,6 +97,18 @@
 
 	const selected = $derived(venues.find((v) => v.osmId === selectedId) ?? null);
 	const selectedCustom = $derived(customs.find((c) => c.id === selectedId) ?? null);
+	const selectedPlace = $derived<MapPlace | null>(
+		selected
+			? { ref: selected.osmId, name: selected.name, lat: selected.lat, lng: selected.lng }
+			: null
+	);
+
+	// A new selection closes the form and clears the last confirmation.
+	$effect(() => {
+		void selectedId;
+		logging = false;
+		notice = null;
+	});
 
 	function bboxAround(lng: number, lat: number, zoom: number): Bbox {
 		// Roughly the visible area of a phone-sized map at this zoom.
@@ -143,9 +162,51 @@
 		};
 	}
 
+	function loadKnown(): Promise<KnownVenue[]> {
+		return getDb()
+			.venues.toArray()
+			.then((all) =>
+				all.flatMap((v) =>
+					v.lat !== null && v.lng !== null ? [{ name: v.name, lat: v.lat, lng: v.lng }] : []
+				)
+			);
+	}
+
+	/** Re-reads history venues after one was added, so the map shows it as visited. */
+	async function refreshVisited(place: MapPlace) {
+		if (isCustom(place.ref)) {
+			customsVersion++;
+			customs = customs.map((x) => (x.id === place.ref ? { ...x, visited: true } : x));
+			return;
+		}
+		knownLoaded = loadKnown();
+		osmVisited = visitedOsmIds(osmVenues, await latestKnown());
+	}
+
+	/**
+	 * History venues as of now. Marking a venue visited replaces `knownLoaded` while a search or
+	 * map move may already be awaiting the old list, so wait until it stops changing; otherwise the
+	 * slower one would finish last and put back the stale "visited" set.
+	 */
+	async function latestKnown(): Promise<KnownVenue[]> {
+		let pending: Promise<KnownVenue[]>;
+		let known: KnownVenue[];
+		do {
+			pending = knownLoaded;
+			known = await pending;
+		} while (pending !== knownLoaded);
+		return known;
+	}
+
+	async function hadDrinkHere(place: MapPlace) {
+		await markVisited(getDb(), place);
+		await refreshVisited(place);
+		notice = `Marked ${place.name} as visited.`;
+	}
+
 	async function showCached() {
 		if (!view) return;
-		const known = await knownLoaded;
+		await knownLoaded;
 		const db = getDb();
 		const version = customsVersion;
 		const [osm, added] = await Promise.all([
@@ -154,7 +215,7 @@
 		]);
 		osmVenues = osm;
 		if (version === customsVersion) customs = added;
-		osmVisited = visitedOsmIds(osm, known);
+		osmVisited = visitedOsmIds(osm, await latestKnown());
 	}
 
 	async function search() {
@@ -164,10 +225,10 @@
 		error = null;
 		status = 'Searching OpenStreetMap…';
 		try {
-			const known = await knownLoaded;
+			await knownLoaded;
 			const result = await loadVenues(getDb(), view.bbox, (b) => fetchOverpass(b, OVERPASS_URL));
 			osmVenues = result.venues;
-			osmVisited = visitedOsmIds(osmVenues, known);
+			osmVisited = visitedOsmIds(osmVenues, await latestKnown());
 			const version = customsVersion;
 			const added = await customVenuesIn(getDb(), view.bbox);
 			if (version === customsVersion) customs = added;
@@ -300,13 +361,7 @@
 	onMount(() => {
 		const saved = readSavedView();
 		let cancelled = false;
-		knownLoaded = getDb()
-			.venues.toArray()
-			.then((all) =>
-				all.flatMap((v) =>
-					v.lat !== null && v.lng !== null ? [{ name: v.name, lat: v.lat, lng: v.lng }] : []
-				)
-			);
+		knownLoaded = loadKnown();
 
 		(async () => {
 			try {
@@ -523,6 +578,30 @@
 						<a href={selected.website} rel="noopener noreferrer external" target="_blank">Website</a
 						>
 					</p>
+				{/if}
+				{#if notice}<p role="status">{notice}</p>{/if}
+				{#if logging && selectedPlace}
+					<LogDrink
+						place={selectedPlace}
+						onlogged={async (_, summary) => {
+							const place = selectedPlace!;
+							logging = false;
+							await refreshVisited(place);
+							notice = summary;
+						}}
+						oncancel={() => (logging = false)}
+					/>
+				{:else if selectedPlace}
+					<div class="toolbar">
+						<button class="button button-primary" type="button" onclick={() => (logging = true)}>
+							Log a drink…
+						</button>
+						{#if !visited.has(selectedPlace.ref) && !selectedCustom}
+							<button class="button" type="button" onclick={() => hadDrinkHere(selectedPlace!)}>
+								I had a drink here
+							</button>
+						{/if}
+					</div>
 				{/if}
 				{#if selectedCustom}
 					<p class="muted small">Added by you, saved on this device.</p>

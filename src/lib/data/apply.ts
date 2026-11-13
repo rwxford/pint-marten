@@ -1,8 +1,12 @@
 import { drinkKey, normalizeText, producerKey, similarity } from '../import/normalize';
 import type { ImportRecord, ParsedImport } from '../import/types';
 import { dateToTimestamp } from '../import/values';
-import type { Drink, PintMartenDB, Producer, Venue } from './db';
+import { distanceMeters, MATCH_RADIUS_M, namesMatch, venueMatchKey } from '../venues/match';
+import type { Consumption, Drink, PintMartenDB, Producer, Venue } from './db';
 import { enrichDrink } from './enrich';
+
+/** A drink logged in the app and an imported check-in this close in time are the same drink. */
+export const MANUAL_MATCH_WINDOW_MS = 2 * 60 * 60 * 1000;
 
 /** Names at least this similar (but not identical) are queued for the user to review. */
 export const PRODUCER_REVIEW_THRESHOLD = 0.88;
@@ -16,6 +20,8 @@ export interface ApplyResult {
 	newProducers: number;
 	newVenues: number;
 	reviewItems: number;
+	/** Drinks logged in the app that this import contained, replaced by the imported rows. */
+	replacedManual: number;
 }
 
 function sourceKey(source: string, id: string | null): string | null {
@@ -94,6 +100,12 @@ export async function applyImport(
 		for (const d of drinks) pushTo(drinksByProducer, d.producerId, d);
 		const venueBySource = new Map(venues.filter((v) => v.sourceKey).map((v) => [v.sourceKey!, v]));
 		const venueByKey = new Map(venues.map((v) => [v.nameKey, v]));
+		const venueById = new Map(venues.map((v) => [v.id, v]));
+		// Drinks logged in the app, by drink, so an imported check-in can replace its hand-logged twin.
+		const manualByDrink = new Map<number, Consumption[]>();
+		for (const c of await db.consumptions.where('rowKey').startsWith('manual:').toArray())
+			pushTo(manualByDrink, c.drinkId, c);
+		const manualJobs = new Map<number, number>();
 
 		const result: ApplyResult = {
 			jobId,
@@ -102,7 +114,8 @@ export async function applyImport(
 			newDrinks: 0,
 			newProducers: 0,
 			newVenues: 0,
-			reviewItems: 0
+			reviewItems: 0,
+			replacedManual: 0
 		};
 
 		const queueReview = async (
@@ -237,6 +250,7 @@ export async function applyImport(
 			}
 			const fields: Omit<Venue, 'id'> = { ...v, nameKey, sourceKey: sk };
 			const created: Venue = { id: await db.venues.add(fields), ...fields };
+			venueById.set(created.id, created);
 			result.newVenues++;
 			if (sk) venueBySource.set(sk, created);
 			if (!venueByKey.has(nameKey)) venueByKey.set(nameKey, created);
@@ -254,12 +268,19 @@ export async function applyImport(
 			const producer = await resolveProducer(rec);
 			const drink = await resolveDrink(rec, producer);
 			const venue = await resolveVenue(rec);
+			const ts = dateToTimestamp(rec.date);
+			const twin = takeManualTwin(manualByDrink, drink.id, ts, venue, venueById);
+			if (twin) {
+				await db.consumptions.delete(twin.id);
+				manualJobs.set(twin.importJobId, (manualJobs.get(twin.importJobId) ?? 0) + 1);
+				result.replacedManual++;
+			}
 			await db.consumptions.add({
 				rowKey,
 				drinkId: drink.id,
 				venueId: venue?.id ?? null,
 				date: rec.date,
-				ts: dateToTimestamp(rec.date),
+				ts,
 				rating: rec.rating,
 				servingType: rec.servingType,
 				importJobId: jobId
@@ -268,8 +289,54 @@ export async function applyImport(
 		}
 
 		await db.importJobs.update(jobId, { added: result.added, duplicates: result.duplicates });
+		for (const [id, removed] of manualJobs)
+			await db.importJobs
+				.where('id')
+				.equals(id)
+				.modify((j) => {
+					j.added = Math.max(0, j.added - removed);
+				});
 		return result;
 	});
+}
+
+/** Same place: the same history venue, or venues within 150 m whose names match. */
+function sameVenue(a: Venue, b: Venue): boolean {
+	if (a.id === b.id) return true;
+	if (a.lat === null || a.lng === null || b.lat === null || b.lng === null)
+		return a.nameKey === b.nameKey;
+	return (
+		distanceMeters(a.lat, a.lng, b.lat, b.lng) <= MATCH_RADIUS_M &&
+		namesMatch(venueMatchKey(a.name), venueMatchKey(b.name))
+	);
+}
+
+/**
+ * Finds and removes from `manualByDrink` the hand-logged consumption an imported check-in
+ * duplicates: same drink, within two hours, and the same venue (unless either side has none).
+ * The closest in time wins.
+ */
+function takeManualTwin(
+	manualByDrink: Map<number, Consumption[]>,
+	drinkId: number,
+	ts: number | null,
+	venue: Venue | null,
+	venueById: Map<number, Venue>
+): Consumption | null {
+	const list = manualByDrink.get(drinkId);
+	if (!list || ts === null) return null;
+	let best = -1;
+	let bestGap = Infinity;
+	for (const [i, c] of list.entries()) {
+		if (c.ts === null) continue;
+		const gap = Math.abs(c.ts - ts);
+		if (gap > MANUAL_MATCH_WINDOW_MS || gap >= bestGap) continue;
+		const mv = c.venueId === null ? undefined : venueById.get(c.venueId);
+		if (venue && mv && !sameVenue(venue, mv)) continue;
+		best = i;
+		bestGap = gap;
+	}
+	return best < 0 ? null : list.splice(best, 1)[0];
 }
 
 function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V) {

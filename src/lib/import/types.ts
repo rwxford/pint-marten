@@ -2,7 +2,8 @@ export const CATEGORIES = ['beer', 'cider', 'mead', 'seltzer', 'kombucha', 'othe
 
 export type Category = (typeof CATEGORIES)[number];
 
-export type ImportSource = 'untappd' | 'generic';
+/** `manual` marks drinks logged one at a time in the app rather than imported from a file. */
+export type ImportSource = 'untappd' | 'generic' | 'manual';
 
 /** One consumption (check-in) from any source, normalized but not yet matched against the DB. */
 export interface ImportRecord {
