@@ -202,3 +202,25 @@ test('pasting on a map venue notes a different venue name', async ({ page }) => 
 	await form.getByRole('button', { name: 'Log drink' }).click();
 	await expect(card.getByRole('status')).toHaveText('Logged Orchard Dry at The Corner Pub.');
 });
+
+test('merging a typo on the Review page drops the hand-logged twin', async ({ page }) => {
+	const problems = trackProblems(page);
+	await page.goto('/log');
+	const form = page.getByRole('form', { name: 'Log a drink' });
+	await expect(form.getByLabel('When')).not.toHaveValue('');
+	await form.getByLabel('Drink', { exact: true }).fill('Marten Hazy');
+	await form.getByLabel('Made by').fill('Fictional Fox Brewing');
+	await form.getByLabel('When').fill('2024-05-16T17:30');
+	await form.getByRole('button', { name: 'Log drink' }).click();
+	await expect(page.getByRole('status')).toHaveText('Logged Marten Hazy.');
+
+	await importUntappd(page);
+	await page.getByRole('link', { name: '1 possible duplicate to review' }).click();
+	await page.getByRole('button', { name: 'Same — merge' }).click();
+	await expect(page.getByText('1 drink you logged in the app was the same check-in')).toBeVisible();
+	await expect(page.getByText('Nothing to review.')).toBeVisible();
+
+	await page.goto('/');
+	await expect(checkIns(page)).toHaveText('11');
+	expect(problems).toEqual([]);
+});

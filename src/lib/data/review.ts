@@ -1,6 +1,7 @@
 import { aliasKey } from './apply';
 import type { PintMartenDB, Producer, ReviewItem } from './db';
 import { enrichDrink } from './enrich';
+import { dropManualTwinsAfterMerge } from './twins';
 
 export interface ReviewEntry {
 	item: ReviewItem;
@@ -54,24 +55,41 @@ export async function keepSeparate(db: PintMartenDB, id: number): Promise<void> 
 	await db.reviewItems.update(id, { status: 'separate' });
 }
 
-/** Merges the newly imported record into the existing candidate. */
-export async function mergeReview(db: PintMartenDB, id: number): Promise<void> {
-	await db.transaction(
+/**
+ * Merges the newly imported record into the existing candidate. Returns how many drinks you
+ * logged in the app were removed because an imported check-in duplicates them once merged.
+ */
+export async function mergeReview(db: PintMartenDB, id: number): Promise<number> {
+	return db.transaction(
 		'rw',
-		[db.producers, db.drinks, db.consumptions, db.reviewItems, db.aliases],
+		[
+			db.producers,
+			db.drinks,
+			db.consumptions,
+			db.reviewItems,
+			db.aliases,
+			db.venues,
+			db.importJobs
+		],
 		async () => {
 			const item = await db.reviewItems.get(id);
-			if (!item || item.status !== 'open') return;
-			if (item.kind === 'drink') await mergeDrinks(db, item.newId, item.candidateId);
-			else await mergeProducers(db, item.newId, item.candidateId);
+			if (!item || item.status !== 'open') return 0;
+			const removed =
+				item.kind === 'drink'
+					? await mergeDrinks(db, item.newId, item.candidateId)
+					: await mergeProducers(db, item.newId, item.candidateId);
 			await db.reviewItems.update(id, { status: 'merged' });
+			return removed;
 		}
 	);
 }
 
-async function mergeDrinks(db: PintMartenDB, fromId: number, intoId: number) {
+async function mergeDrinks(db: PintMartenDB, fromId: number, intoId: number): Promise<number> {
 	const [from, into] = await Promise.all([db.drinks.get(fromId), db.drinks.get(intoId)]);
-	if (!from || !into) return;
+	if (!from || !into) return 0;
+	const moved = new Set(
+		(await db.consumptions.where('drinkId').equals(fromId).primaryKeys()) as number[]
+	);
 	await db.consumptions.where('drinkId').equals(fromId).modify({ drinkId: intoId });
 	const patch = enrichDrink(into, from);
 	if (Object.keys(patch).length) await db.drinks.update(intoId, patch);
@@ -86,17 +104,19 @@ async function mergeDrinks(db: PintMartenDB, fromId: number, intoId: number) {
 	);
 	await db.drinks.delete(fromId);
 	await retarget(db, 'drink', fromId, intoId);
+	return dropManualTwinsAfterMerge(db, intoId, moved);
 }
 
-async function mergeProducers(db: PintMartenDB, fromId: number, intoId: number) {
+async function mergeProducers(db: PintMartenDB, fromId: number, intoId: number): Promise<number> {
 	const [from, into] = await Promise.all([db.producers.get(fromId), db.producers.get(intoId)]);
-	if (!from || !into) return;
+	if (!from || !into) return 0;
+	let removed = 0;
 	const existing = new Map(
 		(await db.drinks.where('producerId').equals(intoId).toArray()).map((d) => [d.key, d])
 	);
 	for (const drink of await db.drinks.where('producerId').equals(fromId).toArray()) {
 		const twin = existing.get(drink.key);
-		if (twin) await mergeDrinks(db, drink.id, twin.id);
+		if (twin) removed += await mergeDrinks(db, drink.id, twin.id);
 		else await db.drinks.update(drink.id, { producerId: intoId });
 	}
 	const patch: Partial<Producer> = {};
@@ -120,6 +140,7 @@ async function mergeProducers(db: PintMartenDB, fromId: number, intoId: number) 
 	);
 	await db.producers.delete(fromId);
 	await retarget(db, 'producer', fromId, intoId);
+	return removed;
 }
 
 /**

@@ -1,10 +1,10 @@
 import { categorize, isNonAlcoholic } from '../import/category';
-import { cleanString, drinkKey, normalizeText, producerKey } from '../import/normalize';
+import { cleanString, drinkKey, normalizeText, producerKey, similarity } from '../import/normalize';
 import type { Category } from '../import/types';
 import { dateToTimestamp } from '../import/values';
 import { isCustom, setCustomVisited } from '../venues/custom';
 import { distanceMeters, MATCH_RADIUS_M, namesMatch, venueMatchKey } from '../venues/match';
-import { aliasKey } from './apply';
+import { aliasKey, DRINK_REVIEW_THRESHOLD, PRODUCER_REVIEW_THRESHOLD } from './apply';
 import type { Drink, PintMartenDB, Producer, Venue } from './db';
 
 /** File name of the standing import job that owns every drink logged in the app. */
@@ -143,6 +143,34 @@ export async function venueForPlace(db: PintMartenDB, place: MapPlace): Promise<
 	return { id: await db.venues.add(fields), ...fields };
 }
 
+/**
+ * Queues a review when a newly created record closely resembles an existing one, as an import
+ * does, so a typo'd name can be merged later (and a later import's twin check-in dropped then).
+ */
+async function queueReviewIfSimilar<T extends { id: number; key: string }>(
+	db: PintMartenDB,
+	kind: 'drink' | 'producer',
+	created: T,
+	others: readonly T[],
+	threshold: number
+) {
+	let best: { id: number; score: number } | null = null;
+	for (const o of others) {
+		if (o.id === created.id) continue;
+		const score = similarity(created.key, o.key);
+		if (score >= threshold && (!best || score > best.score)) best = { id: o.id, score };
+	}
+	if (!best) return;
+	await db.reviewItems.add({
+		kind,
+		newId: created.id,
+		candidateId: best.id,
+		score: Math.round(best.score * 100) / 100,
+		status: 'open',
+		createdAt: new Date().toISOString()
+	});
+}
+
 async function resolveProducer(db: PintMartenDB, name: string): Promise<Producer> {
 	const key = producerKey(name);
 	const direct = await db.producers.where('key').equals(key).first();
@@ -158,7 +186,15 @@ async function resolveProducer(db: PintMartenDB, name: string): Promise<Producer
 		region: null,
 		country: null
 	};
-	return { id: await db.producers.add(fields), ...fields };
+	const created: Producer = { id: await db.producers.add(fields), ...fields };
+	await queueReviewIfSimilar(
+		db,
+		'producer',
+		created,
+		await db.producers.toArray(),
+		PRODUCER_REVIEW_THRESHOLD
+	);
+	return created;
 }
 
 async function resolveDrink(
@@ -193,7 +229,15 @@ async function resolveDrink(
 		category: categorize(style, name),
 		isNA: isNonAlcoholic(abv, style, name)
 	};
-	return { drink: { id: await db.drinks.add(fields), ...fields }, created: true };
+	const drink: Drink = { id: await db.drinks.add(fields), ...fields };
+	await queueReviewIfSimilar(
+		db,
+		'drink',
+		drink,
+		await db.drinks.where('producerId').equals(producer.id).toArray(),
+		DRINK_REVIEW_THRESHOLD
+	);
+	return { drink, created: true };
 }
 
 /**
@@ -211,7 +255,15 @@ export async function logDrink(db: PintMartenDB, entry: DrinkLog): Promise<LogRe
 	const abv = 'drinkId' in entry.drink ? null : (entry.drink.abv ?? null);
 	if (abv !== null && !(abv >= 0 && abv <= 100)) throw new Error('ABV must be 0–100');
 
-	const tables = [db.producers, db.drinks, db.venues, db.consumptions, db.importJobs, db.aliases];
+	const tables = [
+		db.producers,
+		db.drinks,
+		db.venues,
+		db.consumptions,
+		db.importJobs,
+		db.aliases,
+		db.reviewItems
+	];
 	const result = await db.transaction('rw', tables, async () => {
 		const { drink, created } = await resolveDrink(db, entry.drink);
 		let venueId: number | null = null;

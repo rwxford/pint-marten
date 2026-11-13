@@ -146,9 +146,10 @@ shortcuts close that gap without touching Untappd:
 - **Reconciling with later imports:** an imported check-in replaces a hand-logged one for the
   same drink within ±2 hours at the same venue (same history venue, or within 150 m with a
   matching name; a side with no venue doesn't block the match). The import summary says how
-  many were replaced. A hand-logged drink whose name differs slightly from the import's goes
-  to the review queue like any near-duplicate; merging it there does not yet remove the
-  duplicate consumption.
+  many were replaced. A hand-logged drink whose name differs slightly from one in history
+  (whether typed before or after the import) goes to the review queue like any near-duplicate.
+  Merging it there applies the same rule between the two merged drinks, removing the hand-logged
+  check-in an imported one duplicates, and the Review page says so.
 
 ### 4.2 Local data model
 

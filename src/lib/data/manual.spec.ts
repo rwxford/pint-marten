@@ -22,7 +22,9 @@ import {
 	venueForPlace,
 	type MapPlace
 } from './manual';
+import { mergeReview, openReviews } from './review';
 import { getStats } from './stats';
+import { dropManualTwinsAfterMerge } from './twins';
 
 function untappd(): ParsedImport {
 	const file = 'untappd-sample.csv';
@@ -170,6 +172,65 @@ describe('importing after logging by hand', () => {
 		await logDrink(db, { drink: martenHaze, venue: null, date: soonAfter });
 		const r = await applyImport(db, untappd(), 'export.csv');
 		expect(r.replacedManual).toBe(1);
+	});
+});
+
+describe('merging a near-duplicate on the Review page', () => {
+	/** A typo'd hand-logged name for the fixture's first check-in. */
+	const typo = { name: 'Marten Hazy', producer: 'Fictional Fox Brewing' };
+
+	it('drops the hand-logged twin when the import came after', async () => {
+		const logged = await logDrink(db, { drink: typo, venue: { place: taproom }, date: soonAfter });
+		const r = await applyImport(db, untappd(), 'export.csv');
+		// Different drinks, so the import can't tell yet; the near-match is queued instead.
+		expect(r).toMatchObject({ replacedManual: 0, reviewItems: 1 });
+		expect(await db.consumptions.count()).toBe(12);
+
+		const [entry] = await openReviews(db);
+		expect(entry).toMatchObject({ newName: 'Marten Haze', candidateName: 'Marten Hazy' });
+		expect(await mergeReview(db, entry.item.id)).toBe(1);
+		expect(await db.consumptions.get(logged.consumptionId)).toBeUndefined();
+		expect(await db.consumptions.count()).toBe(11);
+		const manualJob = (await db.importJobs.toArray()).find((j) => j.source === 'manual');
+		expect(manualJob!.added).toBe(0);
+	});
+
+	it('queues a typo logged after the import, and drops the twin on merge', async () => {
+		await applyImport(db, untappd(), 'export.csv');
+		const logged = await logDrink(db, { drink: typo, venue: { place: taproom }, date: soonAfter });
+		expect(logged.newDrink).toBe(true);
+		const [entry] = await openReviews(db);
+		expect(entry).toMatchObject({ newName: 'Marten Hazy', candidateName: 'Marten Haze' });
+		expect(await mergeReview(db, entry.item.id)).toBe(1);
+		expect(await db.consumptions.get(logged.consumptionId)).toBeUndefined();
+		expect(await db.drinks.get(logged.drinkId)).toBeUndefined();
+	});
+
+	it('keeps a hand-logged drink with no twin on the other side', async () => {
+		await applyImport(db, untappd(), 'export.csv');
+		// A second pint of a drink already in history: same drink, not part of any merge.
+		const pint = await logDrink(db, {
+			drink: martenHaze,
+			venue: { place: taproom },
+			date: soonAfter
+		});
+		expect(await dropManualTwinsAfterMerge(db, pint.drinkId, new Set())).toBe(0);
+		expect(await db.consumptions.get(pint.consumptionId)).toBeDefined();
+
+		const far = await logDrink(db, { drink: typo, venue: { place: pub }, date: soonAfter });
+		const [entry] = await openReviews(db);
+		expect(await mergeReview(db, entry.item.id)).toBe(0);
+		expect(await db.consumptions.get(far.consumptionId)).toMatchObject({ drinkId: pint.drinkId });
+	});
+
+	it('does not queue a review for a clearly different name', async () => {
+		await applyImport(db, untappd(), 'export.csv');
+		await logDrink(db, {
+			drink: { name: 'Something Else', producer: 'Fictional Fox Brewing' },
+			venue: null,
+			date: soonAfter
+		});
+		expect(await openReviews(db)).toEqual([]);
 	});
 });
 
